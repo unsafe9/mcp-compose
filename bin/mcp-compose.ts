@@ -214,11 +214,11 @@ program
   .description('View server logs')
   .argument('[server]', 'Server name (default: all)')
   .option('-f, --follow', 'Follow log output')
-  .action((server: string | undefined, _options: unknown, cmd: Command) => {
+  .action((server: string | undefined, options: { follow?: boolean }, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
       const { processPrefix } = config.settings;
-      streamLogs(server, processPrefix);
+      streamLogs(server, processPrefix, options.follow);
     } catch (err) {
       handleError(err);
     }
