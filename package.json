@@ -1,0 +1,27 @@
+{
+  "name": "mcp-compose",
+  "version": "0.1.0",
+  "description": "MCP server orchestration tool - manage multiple MCP servers with a single gateway",
+  "type": "module",
+  "bin": {
+    "mcp-compose": "./bin/mcp-compose.js"
+  },
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "node bin/mcp-compose.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "ai",
+    "orchestration"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "http-proxy": "^1.18.1",
+    "pm2": "^5.4.3"
+  }
+}
