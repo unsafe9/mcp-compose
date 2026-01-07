@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { program } from 'commander';
+import { Command } from 'commander';
 import { loadConfig, getStdioServers, getServerNames } from '../src/config.js';
 import {
   startServers,
@@ -11,9 +11,21 @@ import {
   streamLogs,
   setupStartup,
   saveProcessList,
-  unstartup
+  unstartup,
 } from '../src/pm2.js';
 import { syncToClaudeConfig, removeFromClaudeConfig } from '../src/sync.js';
+
+const program = new Command();
+
+function getConfigPath(cmd: Command): string | undefined {
+  return cmd.parent?.opts<{ config?: string }>().config;
+}
+
+function handleError(err: unknown): never {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error('Error:', message);
+  process.exit(1);
+}
 
 program
   .name('mcp-compose')
@@ -25,25 +37,26 @@ program
   .command('up')
   .description('Start MCP servers')
   .argument('[servers...]', 'Specific servers to start (default: all)')
-  .action(async (servers, options, cmd) => {
+  .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
-      const configPath = cmd.parent.opts().config;
-      const config = loadConfig(configPath);
-
+      const config = loadConfig(getConfigPath(cmd));
       const stdioServers = getStdioServers(config);
-      const filteredServers = servers.length > 0
-        ? stdioServers.filter(s => servers.includes(s.name))
-        : stdioServers;
+      const filteredServers =
+        servers.length > 0
+          ? stdioServers.filter((s) => servers.includes(s.name))
+          : stdioServers;
 
       if (filteredServers.length === 0 && servers.length > 0) {
-        console.log('No stdio servers match the filter. Remote servers are synced directly.');
+        console.log(
+          'No stdio servers match the filter. Remote servers are synced directly.'
+        );
       }
 
       if (filteredServers.length > 0) {
-        console.log(`Starting ${filteredServers.length} stdio server(s)...`);
+        console.log(`Starting ${String(filteredServers.length)} stdio server(s)...`);
         const results = await startServers(filteredServers);
         for (const r of results) {
-          console.log(`  ✓ ${r.name} → http://localhost:${r.port}/sse`);
+          console.log(`  ✓ ${r.name} → http://localhost:${String(r.port)}/sse`);
         }
       }
 
@@ -55,10 +68,8 @@ program
       console.log('\nMCP servers are running via pm2.');
       console.log('Use "mcp-compose status" to check status.');
       console.log('Use "mcp-compose logs" to view logs.');
-
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -66,14 +77,13 @@ program
   .command('down')
   .description('Stop MCP servers')
   .argument('[servers...]', 'Specific servers to stop (default: all)')
-  .action(async (servers, options, cmd) => {
+  .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
-      const configPath = cmd.parent.opts().config;
-      const config = loadConfig(configPath);
+      const config = loadConfig(getConfigPath(cmd));
 
       if (servers.length > 0) {
         const validServers = getServerNames(config, servers);
-        console.log(`Stopping ${validServers.length} server(s)...`);
+        console.log(`Stopping ${String(validServers.length)} server(s)...`);
         await stopServers(validServers);
         for (const name of validServers) {
           console.log(`  ✓ ${name} stopped`);
@@ -81,20 +91,21 @@ program
       } else {
         console.log('Stopping all MCP servers...');
         const count = await stopAllMcpServers();
-        console.log(`  ✓ Stopped ${count} server(s)`);
+        console.log(`  ✓ Stopped ${String(count)} server(s)`);
       }
 
       console.log('\nRemoving from Claude Code config...');
-      const removeResult = removeFromClaudeConfig(config, servers.length > 0 ? servers : null);
+      const removeResult = removeFromClaudeConfig(
+        config,
+        servers.length > 0 ? servers : null
+      );
       if (removeResult.removed.length > 0) {
         console.log(`  ✓ Removed: ${removeResult.removed.join(', ')}`);
       } else {
         console.log('  (no changes)');
       }
-
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -102,32 +113,27 @@ program
   .command('restart')
   .description('Restart MCP servers')
   .argument('[servers...]', 'Specific servers to restart (default: all)')
-  .action(async (servers, options, cmd) => {
+  .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
-      const configPath = cmd.parent.opts().config;
-      const config = loadConfig(configPath);
-
+      const config = loadConfig(getConfigPath(cmd));
       const stdioServers = getStdioServers(config);
-      const serverNames = servers.length > 0
-        ? servers
-        : stdioServers.map(s => s.name);
+      const serverNames =
+        servers.length > 0 ? servers : stdioServers.map((s) => s.name);
 
-      console.log(`Restarting ${serverNames.length} server(s)...`);
+      console.log(`Restarting ${String(serverNames.length)} server(s)...`);
       await restartServers(serverNames);
       for (const name of serverNames) {
         console.log(`  ✓ ${name} restarted`);
       }
-
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
 program
   .command('status')
   .description('Show status of MCP servers')
-  .action(async (options, cmd) => {
+  .action(async () => {
     try {
       const status = await getStatus();
 
@@ -137,21 +143,23 @@ program
       }
 
       console.log('MCP Servers:\n');
-      console.log('  Name                 Status     PID      Memory     Restarts');
+      console.log(
+        '  Name                 Status     PID      Memory     Restarts'
+      );
       console.log('  ' + '-'.repeat(65));
 
       for (const s of status) {
-        const memory = s.memory ? `${Math.round(s.memory / 1024 / 1024)}MB` : '-';
+        const memory = s.memory
+          ? `${String(Math.round(s.memory / 1024 / 1024))}MB`
+          : '-';
         const statusColor = s.status === 'online' ? '\x1b[32m' : '\x1b[31m';
         const reset = '\x1b[0m';
         console.log(
-          `  ${s.name.padEnd(20)} ${statusColor}${s.status.padEnd(10)}${reset} ${String(s.pid || '-').padEnd(8)} ${memory.padEnd(10)} ${s.restarts}`
+          `  ${s.name.padEnd(20)} ${statusColor}${s.status.padEnd(10)}${reset} ${String(s.pid ?? '-').padEnd(8)} ${memory.padEnd(10)} ${String(s.restarts)}`
         );
       }
-
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -160,12 +168,11 @@ program
   .description('View server logs')
   .argument('[server]', 'Server name (default: all)')
   .option('-f, --follow', 'Follow log output')
-  .action(async (server, options) => {
+  .action((server?: string) => {
     try {
-      await streamLogs(server);
+      streamLogs(server);
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -180,8 +187,7 @@ program
       await saveProcessList();
       console.log('\n✓ Auto-start enabled. MCP servers will start on boot.');
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
@@ -194,8 +200,7 @@ program
       await unstartup();
       console.log('\n✓ Auto-start disabled.');
     } catch (err) {
-      console.error('Error:', err.message);
-      process.exit(1);
+      handleError(err);
     }
   });
 
