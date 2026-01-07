@@ -39,7 +39,10 @@ export function syncToClaudeConfig(config: NormalizedConfig): SyncResult {
     try {
       const content = readFileSync(claudeConfigPath, 'utf-8');
       existingConfig = JSON.parse(content) as ClaudeConfig;
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Warning: Failed to parse ${claudeConfigPath}: ${message}`);
+      console.error('  Existing config will be overwritten.');
       existingConfig = {};
     }
   }
@@ -79,7 +82,9 @@ export function removeFromClaudeConfig(
   try {
     const content = readFileSync(claudeConfigPath, 'utf-8');
     existingConfig = JSON.parse(content) as ClaudeConfig;
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Warning: Failed to parse ${claudeConfigPath}: ${message}`);
     return { path: claudeConfigPath, removed: [] };
   }
 
