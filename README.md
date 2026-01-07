@@ -1,6 +1,10 @@
 # mcp-compose
 
-Orchestrate multiple MCP servers through a unified Streamable HTTP gateway. Converts stdio-based MCP servers to Streamable HTTP endpoints and manages them with pm2.
+Run MCP servers once, share them across all Claude Code sessions.
+
+Claude Code launches stdio MCP servers per session by default. mcp-compose converts them to persistent HTTP endpoints using [supergateway](https://github.com/supercorp-ai/supergateway) and manages them with [pm2](https://github.com/Unitech/pm2), so multiple sessions can connect to the same running servers.
+
+Servers run directly on your system without containerization, preserving full access to local dependencies that some MCP servers require.
 
 ## Installation
 
