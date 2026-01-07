@@ -16,8 +16,8 @@ function generateClaudeConfig(
   for (const [name, server] of Object.entries(mcpServers)) {
     if (server.type === 'stdio') {
       claudeConfig[name] = {
-        type: 'sse',
-        url: `http://localhost:${String(server.internalPort)}/sse`,
+        type: 'http',
+        url: `http://localhost:${String(server.internalPort)}/mcp`,
       };
     } else {
       claudeConfig[name] = {

@@ -13,6 +13,8 @@ export function buildSupergatewayCmdForServer(server: StdioServer): Supergateway
       'supergateway@latest',
       '--stdio',
       stdioCmd,
+      '--outputTransport',
+      'streamableHttp',
       '--port',
       String(internalPort),
     ],

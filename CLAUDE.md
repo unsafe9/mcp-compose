@@ -1,6 +1,6 @@
 # mcp-compose
 
-MCP server orchestration tool - manages multiple MCP servers through a unified SSE gateway.
+MCP server orchestration tool - manages multiple MCP servers through a unified Streamable HTTP gateway.
 
 ## Quick Start
 
@@ -20,8 +20,8 @@ node bin/mcp-compose.js down    # Stop all servers
 ```
 mcp-compose up
   └── For each stdio server:
-        pm2 start "npx supergateway --stdio <cmd> --port <internal-port>"
-  └── Write ~/.mcp.json with SSE URLs
+        pm2 start "npx supergateway --stdio <cmd> --outputTransport streamableHttp --port <internal-port>"
+  └── Write ~/.mcp.json with Streamable HTTP URLs
 ```
 
 ## Project Structure
@@ -78,7 +78,7 @@ Config file: `mcp-compose.json` or `mcp-compose.jsonc` (searches up directory tr
 - **commander** - CLI parsing
 - **pm2** - Process management with auto-restart
 - **http-proxy** - Proxy for remote servers
-- **supergateway** (via npx) - Converts stdio MCP to SSE
+- **supergateway** (via npx) - Converts stdio MCP to Streamable HTTP
 
 ## Key Implementation Notes
 

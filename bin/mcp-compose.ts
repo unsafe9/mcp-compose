@@ -56,7 +56,7 @@ program
         console.log(`Starting ${String(filteredServers.length)} stdio server(s)...`);
         const results = await startServers(filteredServers);
         for (const r of results) {
-          console.log(`  ✓ ${r.name} → http://localhost:${String(r.port)}/sse`);
+          console.log(`  ✓ ${r.name} → http://localhost:${String(r.port)}/mcp`);
         }
       }
 
