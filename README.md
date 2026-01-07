@@ -193,8 +193,6 @@ mcp-compose down [servers...]    Stop servers
 mcp-compose restart [servers...] Restart servers
 mcp-compose status               Show running servers
 mcp-compose logs [server] [-f]   View logs (follow with -f)
-mcp-compose startup              Enable auto-start on boot
-mcp-compose unstartup            Disable auto-start
 ```
 
 ### Options

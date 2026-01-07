@@ -107,16 +107,6 @@ async function withPm2<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function execPm2Command(args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['pm2', ...args], { stdio: 'inherit' });
-    proc.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`pm2 ${args.join(' ')} failed with code ${String(code)}`));
-    });
-  });
-}
-
 function getProcessName(serverName: string, prefix: string): string {
   return `${prefix}${serverName}`;
 }
@@ -273,16 +263,4 @@ export function streamLogs(serverName?: string, prefix?: string): ReturnType<typ
     args.push(getProcessName(serverName, prefix));
   }
   return spawn('npx', args, { stdio: 'inherit' });
-}
-
-export function setupStartup(): Promise<void> {
-  return execPm2Command(['startup']);
-}
-
-export function saveProcessList(): Promise<void> {
-  return execPm2Command(['save']);
-}
-
-export function unstartup(): Promise<void> {
-  return execPm2Command(['unstartup']);
 }

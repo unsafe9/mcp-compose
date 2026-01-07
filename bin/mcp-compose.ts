@@ -14,9 +14,6 @@ import {
   restartServers,
   getStatus,
   streamLogs,
-  setupStartup,
-  saveProcessList,
-  unstartup,
 } from '../src/pm2.js';
 import type { ProgressEvent } from '../src/pm2.js';
 import { syncToClaudeConfig, removeFromClaudeConfig } from '../src/sync.js';
@@ -222,34 +219,6 @@ program
       const config = loadConfig(getConfigPath(cmd));
       const { processPrefix } = config.settings;
       streamLogs(server, processPrefix);
-    } catch (err) {
-      handleError(err);
-    }
-  });
-
-program
-  .command('startup')
-  .description('Enable auto-start on system boot')
-  .action(async () => {
-    try {
-      console.log('Setting up pm2 startup...');
-      await setupStartup();
-      console.log('\nSaving current process list...');
-      await saveProcessList();
-      console.log('\n✓ Auto-start enabled. MCP servers will start on boot.');
-    } catch (err) {
-      handleError(err);
-    }
-  });
-
-program
-  .command('unstartup')
-  .description('Disable auto-start on system boot')
-  .action(async () => {
-    try {
-      console.log('Removing pm2 startup...');
-      await unstartup();
-      console.log('\n✓ Auto-start disabled.');
     } catch (err) {
       handleError(err);
     }
