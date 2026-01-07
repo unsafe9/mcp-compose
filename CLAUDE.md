@@ -37,3 +37,10 @@ After making changes, run:
 ```bash
 npm run lint:fix && npm run build && npm run lint
 ```
+
+## Release
+
+1. Bump npm version
+2. Create github release
+3. Github action will trigger npm publish
+
