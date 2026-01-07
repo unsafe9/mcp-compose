@@ -1,6 +1,6 @@
 {
   "name": "mcp-compose",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "MCP server orchestration tool - manage multiple MCP servers with a single gateway",
   "type": "module",
   "bin": {
