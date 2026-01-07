@@ -2,7 +2,7 @@ import { expandPath } from './config.js';
 import type { StdioServer, SupergatewayCommand } from './types.js';
 
 export function buildSupergatewayCmdForServer(server: StdioServer): SupergatewayCommand {
-  const { command, args, internalPort } = server;
+  const { command, args, internalPort, logLevel } = server;
 
   const stdioCmd = buildStdioCommand(command, args);
 
@@ -17,6 +17,8 @@ export function buildSupergatewayCmdForServer(server: StdioServer): Supergateway
       'streamableHttp',
       '--port',
       String(internalPort),
+      '--logLevel',
+      logLevel,
     ],
   };
 }

@@ -1,6 +1,9 @@
+export type LogLevel = 'debug' | 'info' | 'none';
+
 export interface Settings {
   portBase: number;
   claudeConfigPath: string;
+  logLevel: LogLevel;
 }
 
 export interface RawStdioServer {
@@ -9,6 +12,7 @@ export interface RawStdioServer {
   args?: string[];
   env?: Record<string, string>;
   disabled?: boolean;
+  logLevel?: LogLevel;
 }
 
 export interface RawRemoteServer {
@@ -31,6 +35,7 @@ export interface StdioServer {
   args: string[];
   env: Record<string, string>;
   internalPort: number;
+  logLevel: LogLevel;
 }
 
 export interface RemoteServer {

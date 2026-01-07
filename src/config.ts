@@ -14,6 +14,7 @@ import type {
 const DEFAULT_SETTINGS: Settings = {
   portBase: 19100,
   claudeConfigPath: '~/.mcp.json',
+  logLevel: 'info',
 };
 
 const CONFIG_FILENAMES = [
@@ -78,7 +79,7 @@ export function normalizeConfig(config: RawConfig): NormalizedConfig {
       continue;
     }
 
-    const normalized = normalizeServer(name, server, settings.portBase + portIndex);
+    const normalized = normalizeServer(name, server, settings.portBase + portIndex, settings);
     mcpServers[name] = normalized;
 
     if (normalized.type === 'stdio') {
@@ -96,7 +97,8 @@ export function normalizeConfig(config: RawConfig): NormalizedConfig {
 function normalizeServer(
   name: string,
   server: RawServerConfig,
-  internalPort: number
+  internalPort: number,
+  settings: Settings
 ): NormalizedServer {
   const type = server.type ?? ('command' in server ? 'stdio' : 'http');
 
@@ -111,6 +113,7 @@ function normalizeServer(
       args: server.args ?? [],
       env: server.env ?? {},
       internalPort,
+      logLevel: server.logLevel ?? settings.logLevel,
     };
   }
 
