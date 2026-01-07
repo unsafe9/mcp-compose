@@ -4,11 +4,27 @@
   "description": "MCP server orchestration tool - manage multiple MCP servers with a single gateway",
   "type": "module",
   "bin": {
-    "mcp-compose": "./bin/mcp-compose.js"
+    "mcp-compose": "./dist/bin/mcp-compose.js"
   },
-  "main": "./src/index.js",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "start": "node bin/mcp-compose.js"
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "eslint src bin",
+    "lint:fix": "eslint src bin --fix",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run clean && npm run build",
+    "start": "node dist/bin/mcp-compose.js"
   },
   "keywords": [
     "mcp",
@@ -23,5 +39,13 @@
     "commander": "^12.1.0",
     "http-proxy": "^1.18.1",
     "pm2": "^5.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/http-proxy": "^1.17.17",
+    "@types/node": "^25.0.3",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0"
   }
 }
