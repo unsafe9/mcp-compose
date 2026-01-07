@@ -4,7 +4,39 @@ import { spawn } from 'child_process';
 import { buildSupergatewayCmdForServer } from './supergateway.js';
 import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
 
+export type ProgressCallback = (event: ProgressEvent) => void;
+
+export interface ProgressEvent {
+  type: 'starting' | 'started' | 'stopping' | 'stopped' | 'port_skipped' | 'checking_ports';
+  server: string;
+  port?: number;
+  originalPort?: number;
+  current?: number;
+  total?: number;
+}
+
 const PM2_PREFIX = 'mcp-';
+
+/**
+ * Parse memory limit string (e.g., "512M", "1G") to bytes
+ */
+function parseMemoryLimit(limit: string | number): number | undefined {
+  if (typeof limit === 'number') return limit;
+
+  const regex = /^(\d+)([KMG])?$/i;
+  const match = regex.exec(limit);
+  if (!match?.[1]) return undefined;
+
+  const value = parseInt(match[1], 10);
+  const unit = (match[2] ?? '').toUpperCase();
+
+  switch (unit) {
+    case 'K': return value * 1024;
+    case 'M': return value * 1024 * 1024;
+    case 'G': return value * 1024 * 1024 * 1024;
+    default: return value;
+  }
+}
 
 // Note: pm2's types incorrectly define callbacks as (err: Error) instead of (err: Error | null)
 // We use type assertions to handle this properly
@@ -84,23 +116,57 @@ function isMcpProcess(p: ProcessDescription): p is ProcessDescription & { name: 
   return typeof p.name === 'string' && p.name.startsWith(PM2_PREFIX);
 }
 
-export function startServers(servers: NamedStdioServer[]): Promise<StartResult[]> {
+export function startServers(
+  servers: NamedStdioServer[],
+  onProgress?: ProgressCallback
+): Promise<StartResult[]> {
   return withPm2(async () => {
     const results: StartResult[] = [];
+    const total = servers.length;
+    let current = 0;
 
-    for (const { name, ...server } of servers) {
+    for (const serverEntry of servers) {
+      current++;
+      const { name, resourceLimits, ...server } = serverEntry;
       const processName = getProcessName(name);
-      const cmd = buildSupergatewayCmdForServer(server);
+      const cmd = buildSupergatewayCmdForServer({ ...server, resourceLimits });
+
+      onProgress?.({
+        type: 'starting',
+        server: name,
+        port: server.internalPort,
+        current,
+        total,
+      });
 
       await pm2Delete(processName);
-      await pm2Start({
+
+      const startOptions: StartOptions = {
         name: processName,
         script: cmd.script,
         args: cmd.args,
         env: server.env,
         autorestart: true,
-        max_restarts: 10,
-        restart_delay: 1000,
+        max_restarts: resourceLimits.maxRestarts ?? 10,
+        restart_delay: resourceLimits.restartDelay ?? 1000,
+      };
+
+      // Add memory limit if specified
+      if (resourceLimits.maxMemory !== undefined) {
+        const maxMemory = parseMemoryLimit(resourceLimits.maxMemory);
+        if (maxMemory) {
+          startOptions.max_memory_restart = maxMemory;
+        }
+      }
+
+      await pm2Start(startOptions);
+
+      onProgress?.({
+        type: 'started',
+        server: name,
+        port: server.internalPort,
+        current,
+        total,
       });
 
       results.push({ name, processName, port: server.internalPort });
@@ -110,10 +176,31 @@ export function startServers(servers: NamedStdioServer[]): Promise<StartResult[]
   });
 }
 
-export function stopServers(serverNames: string[]): Promise<void> {
+export function stopServers(
+  serverNames: string[],
+  onProgress?: ProgressCallback
+): Promise<void> {
   return withPm2(async () => {
+    const total = serverNames.length;
+    let current = 0;
+
     for (const name of serverNames) {
+      current++;
+      onProgress?.({
+        type: 'stopping',
+        server: name,
+        current,
+        total,
+      });
+
       await pm2Delete(getProcessName(name));
+
+      onProgress?.({
+        type: 'stopped',
+        server: name,
+        current,
+        total,
+      });
     }
   });
 }

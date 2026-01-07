@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { loadConfig, getStdioServers, getServerNames } from '../src/config.js';
+import {
+  loadConfig,
+  getStdioServers,
+  getServerNames,
+  allocatePorts,
+} from '../src/config.js';
 import {
   startServers,
   stopServers,
@@ -13,7 +18,33 @@ import {
   saveProcessList,
   unstartup,
 } from '../src/pm2.js';
+import type { ProgressEvent } from '../src/pm2.js';
 import { syncToClaudeConfig, removeFromClaudeConfig } from '../src/sync.js';
+
+function formatProgress(event: ProgressEvent): string {
+  const progress = event.total ? `[${String(event.current)}/${String(event.total)}]` : '';
+  switch (event.type) {
+    case 'checking_ports':
+      return `  ⋯ Checking port availability...`;
+    case 'port_skipped':
+      return `  ⚠ Port ${String(event.originalPort)} in use, using ${String(event.port)} instead`;
+    case 'starting':
+      return `  ${progress} Starting ${event.server}...`;
+    case 'started':
+      return `  ${progress} ✓ ${event.server} → http://localhost:${String(event.port)}/mcp`;
+    case 'stopping':
+      return `  ${progress} Stopping ${event.server}...`;
+    case 'stopped':
+      return `  ${progress} ✓ ${event.server} stopped`;
+    default:
+      return '';
+  }
+}
+
+function printProgress(event: ProgressEvent): void {
+  const msg = formatProgress(event);
+  if (msg) console.log(msg);
+}
 
 const program = new Command();
 
@@ -53,11 +84,29 @@ program
       }
 
       if (filteredServers.length > 0) {
-        console.log(`Starting ${String(filteredServers.length)} stdio server(s)...`);
-        const results = await startServers(filteredServers);
-        for (const r of results) {
-          console.log(`  ✓ ${r.name} → http://localhost:${String(r.port)}/mcp`);
-        }
+        console.log(`Starting ${String(filteredServers.length)} stdio server(s)...\n`);
+
+        // Check port availability and allocate ports
+        console.log('  ⋯ Checking port availability...');
+        const ports = await allocatePorts(
+          filteredServers.length,
+          config.settings.portBase,
+          (originalPort, assignedPort) => {
+            console.log(`  ⚠ Port ${String(originalPort)} in use, using ${String(assignedPort)} instead`);
+          }
+        );
+
+        // Update servers with allocated ports
+        const serversWithPorts = filteredServers.map((server, i) => {
+          const port = ports[i];
+          if (port === undefined) {
+            throw new Error(`Port allocation failed for server ${server.name}`);
+          }
+          return { ...server, internalPort: port };
+        });
+
+        console.log('');
+        await startServers(serversWithPorts, printProgress);
       }
 
       console.log('\nSyncing to Claude Code config...');
@@ -83,11 +132,8 @@ program
 
       if (servers.length > 0) {
         const validServers = getServerNames(config, servers);
-        console.log(`Stopping ${String(validServers.length)} server(s)...`);
-        await stopServers(validServers);
-        for (const name of validServers) {
-          console.log(`  ✓ ${name} stopped`);
-        }
+        console.log(`Stopping ${String(validServers.length)} server(s)...\n`);
+        await stopServers(validServers, printProgress);
       } else {
         console.log('Stopping all MCP servers...');
         const count = await stopAllMcpServers();

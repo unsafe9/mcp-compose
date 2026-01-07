@@ -1,5 +1,11 @@
 export type LogLevel = 'debug' | 'info' | 'none';
 
+export interface ResourceLimits {
+  maxMemory?: string | number; // e.g., "512M", "1G", or bytes as number
+  maxRestarts?: number;        // Maximum restart attempts (default: 10)
+  restartDelay?: number;       // Delay between restarts in ms (default: 1000)
+}
+
 export interface Settings {
   portBase: number;
   claudeConfigPath: string;
@@ -13,6 +19,7 @@ export interface RawStdioServer {
   env?: Record<string, string>;
   disabled?: boolean;
   logLevel?: LogLevel;
+  resourceLimits?: ResourceLimits;
 }
 
 export interface RawRemoteServer {
@@ -36,6 +43,7 @@ export interface StdioServer {
   env: Record<string, string>;
   internalPort: number;
   logLevel: LogLevel;
+  resourceLimits: ResourceLimits;
 }
 
 export interface RemoteServer {
