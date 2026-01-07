@@ -10,6 +10,7 @@ export interface Settings {
   portBase: number;
   claudeConfigPath: string;
   logLevel: LogLevel;
+  processPrefix: string;
 }
 
 export interface RawStdioServer {

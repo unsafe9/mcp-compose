@@ -15,7 +15,15 @@ export interface ProgressEvent {
   total?: number;
 }
 
-const PM2_PREFIX = 'mcp-';
+// Environment variable marker to identify mcp-compose managed processes
+const MCP_COMPOSE_MARKER = '__MCP_COMPOSE__';
+
+interface Pm2EnvWithMarker {
+  [MCP_COMPOSE_MARKER]?: string;
+  status?: string;
+  pm_uptime?: number;
+  restart_time?: number;
+}
 
 /**
  * Parse memory limit string (e.g., "512M", "1G") to bytes
@@ -62,7 +70,8 @@ function pm2Start(options: StartOptions): Promise<void> {
 function pm2Delete(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
     pm2.delete(name, ((err: Error | null) => {
-      if (err?.message.includes('not found') === false) {
+      // Ignore "not found" errors (process already stopped)
+      if (err && !err.message.includes('not found')) {
         reject(err);
       } else {
         resolve();
@@ -108,16 +117,28 @@ function execPm2Command(args: string[]): Promise<void> {
   });
 }
 
-function getProcessName(serverName: string): string {
-  return `${PM2_PREFIX}${serverName}`;
+function getProcessName(serverName: string, prefix: string): string {
+  return `${prefix}${serverName}`;
 }
 
-function isMcpProcess(p: ProcessDescription): p is ProcessDescription & { name: string } {
-  return typeof p.name === 'string' && p.name.startsWith(PM2_PREFIX);
+/**
+ * Check if a process is managed by mcp-compose by looking for the marker env var
+ */
+function isManagedProcess(p: ProcessDescription): p is ProcessDescription & { name: string; pm2_env: Pm2EnvWithMarker } {
+  const env = p.pm2_env as Pm2EnvWithMarker | undefined;
+  return typeof p.name === 'string' && env?.[MCP_COMPOSE_MARKER] !== undefined;
+}
+
+/**
+ * Get the server name from a managed process (stored in the marker env var)
+ */
+function getServerNameFromProcess(p: ProcessDescription & { name: string; pm2_env: Pm2EnvWithMarker }): string {
+  return p.pm2_env[MCP_COMPOSE_MARKER] ?? p.name;
 }
 
 export function startServers(
   servers: NamedStdioServer[],
+  prefix: string,
   onProgress?: ProgressCallback
 ): Promise<StartResult[]> {
   return withPm2(async () => {
@@ -128,7 +149,7 @@ export function startServers(
     for (const serverEntry of servers) {
       current++;
       const { name, resourceLimits, ...server } = serverEntry;
-      const processName = getProcessName(name);
+      const processName = getProcessName(name, prefix);
       const cmd = buildSupergatewayCmdForServer({ ...server, resourceLimits });
 
       onProgress?.({
@@ -145,7 +166,10 @@ export function startServers(
         name: processName,
         script: cmd.script,
         args: cmd.args,
-        env: server.env,
+        env: {
+          ...server.env,
+          [MCP_COMPOSE_MARKER]: name, // Mark as managed and store server name
+        },
         autorestart: true,
         max_restarts: resourceLimits.maxRestarts ?? 10,
         restart_delay: resourceLimits.restartDelay ?? 1000,
@@ -178,6 +202,7 @@ export function startServers(
 
 export function stopServers(
   serverNames: string[],
+  prefix: string,
   onProgress?: ProgressCallback
 ): Promise<void> {
   return withPm2(async () => {
@@ -193,7 +218,7 @@ export function stopServers(
         total,
       });
 
-      await pm2Delete(getProcessName(name));
+      await pm2Delete(getProcessName(name, prefix));
 
       onProgress?.({
         type: 'stopped',
@@ -205,23 +230,23 @@ export function stopServers(
   });
 }
 
-export function stopAllMcpServers(): Promise<number> {
+export function stopAllManagedServers(): Promise<number> {
   return withPm2(async () => {
     const list = await pm2List();
-    const mcpProcesses = list.filter(isMcpProcess);
+    const managedProcesses = list.filter(isManagedProcess);
 
-    for (const proc of mcpProcesses) {
+    for (const proc of managedProcesses) {
       await pm2Delete(proc.name);
     }
 
-    return mcpProcesses.length;
+    return managedProcesses.length;
   });
 }
 
-export function restartServers(serverNames: string[]): Promise<void> {
+export function restartServers(serverNames: string[], prefix: string): Promise<void> {
   return withPm2(async () => {
     for (const name of serverNames) {
-      await pm2Restart(getProcessName(name));
+      await pm2Restart(getProcessName(name, prefix));
     }
   });
 }
@@ -229,23 +254,23 @@ export function restartServers(serverNames: string[]): Promise<void> {
 export function getStatus(): Promise<ServerStatus[]> {
   return withPm2(async () => {
     const list = await pm2List();
-    return list.filter(isMcpProcess).map((p) => ({
-      name: p.name.replace(PM2_PREFIX, ''),
+    return list.filter(isManagedProcess).map((p) => ({
+      name: getServerNameFromProcess(p),
       processName: p.name,
       pid: p.pid,
-      status: p.pm2_env?.status ?? 'unknown',
-      uptime: p.pm2_env?.pm_uptime,
-      restarts: p.pm2_env?.restart_time ?? 0,
+      status: p.pm2_env.status ?? 'unknown',
+      uptime: p.pm2_env.pm_uptime,
+      restarts: p.pm2_env.restart_time ?? 0,
       memory: p.monit?.memory,
       cpu: p.monit?.cpu,
     }));
   });
 }
 
-export function streamLogs(serverName?: string): ReturnType<typeof spawn> {
+export function streamLogs(serverName?: string, prefix?: string): ReturnType<typeof spawn> {
   const args = ['pm2', 'logs'];
-  if (serverName) {
-    args.push(getProcessName(serverName));
+  if (serverName && prefix) {
+    args.push(getProcessName(serverName, prefix));
   }
   return spawn('npx', args, { stdio: 'inherit' });
 }

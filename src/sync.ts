@@ -47,7 +47,7 @@ export function syncToClaudeConfig(config: NormalizedConfig): SyncResult {
   const newServers = generateClaudeConfig(config);
 
   const mergedConfig: ClaudeConfig = { ...existingConfig };
-  mergedConfig.mcpServers = { ...existingConfig.mcpServers };
+  mergedConfig.mcpServers = { ...(existingConfig.mcpServers ?? {}) };
   for (const [name, serverConfig] of Object.entries(newServers)) {
     mergedConfig.mcpServers[name] = serverConfig;
   }

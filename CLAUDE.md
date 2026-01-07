@@ -17,7 +17,8 @@ src/
 
 ## Key Patterns
 
-- Process names prefixed with `mcp-` for pm2 filtering
+- Process names prefixed with `mcp-compose-` (configurable via `settings.processPrefix`)
+- Managed processes identified by `__MCP_COMPOSE__` env var (stores server name)
 - Ports start at 19100, auto-skip if in use
 - Config sync merges with existing `~/.mcp.json` (non-destructive)
 - stdio servers wrapped via `npx supergateway --outputTransport streamableHttp`

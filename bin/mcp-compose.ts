@@ -10,7 +10,7 @@ import {
 import {
   startServers,
   stopServers,
-  stopAllMcpServers,
+  stopAllManagedServers,
   restartServers,
   getStatus,
   streamLogs,
@@ -71,6 +71,7 @@ program
   .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
+      const { processPrefix } = config.settings;
       const stdioServers = getStdioServers(config);
       const filteredServers =
         servers.length > 0
@@ -106,7 +107,7 @@ program
         });
 
         console.log('');
-        await startServers(serversWithPorts, printProgress);
+        await startServers(serversWithPorts, processPrefix, printProgress);
       }
 
       console.log('\nSyncing to Claude Code config...');
@@ -129,14 +130,15 @@ program
   .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
+      const { processPrefix } = config.settings;
 
       if (servers.length > 0) {
         const validServers = getServerNames(config, servers);
         console.log(`Stopping ${String(validServers.length)} server(s)...\n`);
-        await stopServers(validServers, printProgress);
+        await stopServers(validServers, processPrefix, printProgress);
       } else {
         console.log('Stopping all MCP servers...');
-        const count = await stopAllMcpServers();
+        const count = await stopAllManagedServers();
         console.log(`  ✓ Stopped ${String(count)} server(s)`);
       }
 
@@ -162,12 +164,13 @@ program
   .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
+      const { processPrefix } = config.settings;
       const stdioServers = getStdioServers(config);
       const serverNames =
         servers.length > 0 ? servers : stdioServers.map((s) => s.name);
 
       console.log(`Restarting ${String(serverNames.length)} server(s)...`);
-      await restartServers(serverNames);
+      await restartServers(serverNames, processPrefix);
       for (const name of serverNames) {
         console.log(`  ✓ ${name} restarted`);
       }
@@ -214,9 +217,11 @@ program
   .description('View server logs')
   .argument('[server]', 'Server name (default: all)')
   .option('-f, --follow', 'Follow log output')
-  .action((server?: string) => {
+  .action((server: string | undefined, _options: unknown, cmd: Command) => {
     try {
-      streamLogs(server);
+      const config = loadConfig(getConfigPath(cmd));
+      const { processPrefix } = config.settings;
+      streamLogs(server, processPrefix);
     } catch (err) {
       handleError(err);
     }

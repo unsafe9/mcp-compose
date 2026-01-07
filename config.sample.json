@@ -1,7 +1,9 @@
 {
   "settings": {
     "portBase": 19100,
-    "claudeConfigPath": "~/.mcp.json"
+    "claudeConfigPath": "~/.mcp.json",
+    "logLevel": "info",
+    "processPrefix": "mcp-compose-"
   },
   "mcpServers": {
     "aws-docs": {
@@ -10,6 +12,12 @@
       "args": ["awslabs.aws-documentation-mcp-server@latest"],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "logLevel": "info",
+      "resourceLimits": {
+        "maxMemory": "512M",
+        "maxRestarts": 10,
+        "restartDelay": 1000
       }
     },
     "github": {

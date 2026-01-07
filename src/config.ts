@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: Settings = {
   portBase: 19100,
   claudeConfigPath: '~/.mcp.json',
   logLevel: 'info',
+  processPrefix: 'mcp-compose-',
 };
 
 const CONFIG_FILENAMES = [
@@ -100,7 +101,7 @@ export function isPortAvailable(port: number): Promise<boolean> {
 /**
  * Find the next available port starting from the given port
  */
-export async function findAvailablePort(startPort: number, maxAttempts = 100): Promise<number> {
+async function findAvailablePort(startPort: number, maxAttempts = 100): Promise<number> {
   for (let i = 0; i < maxAttempts; i++) {
     const port = startPort + i;
     if (port > 65535) {
