@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'module';
 import { Command } from 'commander';
 import {
   loadConfig,
@@ -7,6 +8,9 @@ import {
   getServerNames,
   allocatePorts,
 } from '../src/config.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json') as { version: string };
 import {
   startServers,
   stopServers,
@@ -63,7 +67,7 @@ function handleError(err: unknown): never {
 program
   .name('mcp-compose')
   .description('MCP server orchestration tool')
-  .version('0.1.0')
+  .version(version)
   .option('-c, --config <path>', 'Path to config file');
 
 program
