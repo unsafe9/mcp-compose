@@ -192,7 +192,7 @@ Add `"disabled": true` to skip a server without removing its config:
 ## CLI Reference
 
 ```
-mcp-compose up [servers...]      Start all or specific servers
+mcp-compose up [servers...]      Start or update servers (only restarts changed configs)
 mcp-compose down [servers...]    Stop servers
 mcp-compose restart [servers...] Restart servers
 mcp-compose status               Show running servers
@@ -243,9 +243,9 @@ Each stdio server gets an internal port starting from `portBase` (default 19100)
 
 ## Features
 
+- **Incremental updates**: Only restarts servers with changed configurations
 - **Automatic port conflict detection**: Skips ports in use and allocates next available
 - **Config validation**: Validates configuration structure with helpful error messages
-- **Progress feedback**: Shows real-time progress during server operations
 - **Resource limits**: Control memory usage and restart behavior per server
 - **Process management**: Auto-restart with configurable limits via pm2
 - **Non-destructive config sync**: Merges with existing Claude Code config

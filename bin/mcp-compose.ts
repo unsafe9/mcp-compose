@@ -19,20 +19,25 @@ import type { ProgressEvent } from '../src/pm2.js';
 import { syncToClaudeConfig, removeFromClaudeConfig } from '../src/sync.js';
 
 function formatProgress(event: ProgressEvent): string {
-  const progress = event.total ? `[${String(event.current)}/${String(event.total)}]` : '';
   switch (event.type) {
     case 'checking_ports':
       return `  ⋯ Checking port availability...`;
     case 'port_skipped':
       return `  ⚠ Port ${String(event.originalPort)} in use, using ${String(event.port)} instead`;
     case 'starting':
-      return `  ${progress} Starting ${event.server}...`;
+      return `  Starting ${event.server}...`;
     case 'started':
-      return `  ${progress} ✓ ${event.server} → http://localhost:${String(event.port)}/mcp`;
+      return `  ✓ ${event.server} Started`;
+    case 'recreating':
+      return `  Recreating ${event.server}...`;
+    case 'recreated':
+      return `  ✓ ${event.server} Recreated`;
+    case 'up_to_date':
+      return `  ${event.server} is up to date`;
     case 'stopping':
-      return `  ${progress} Stopping ${event.server}...`;
+      return `  Stopping ${event.server}...`;
     case 'stopped':
-      return `  ${progress} ✓ ${event.server} stopped`;
+      return `  ✓ ${event.server} Stopped`;
     default:
       return '';
   }
@@ -82,10 +87,7 @@ program
       }
 
       if (filteredServers.length > 0) {
-        console.log(`Starting ${String(filteredServers.length)} stdio server(s)...\n`);
-
         // Check port availability and allocate ports
-        console.log('  ⋯ Checking port availability...');
         const ports = await allocatePorts(
           filteredServers.length,
           config.settings.portBase,
@@ -103,18 +105,12 @@ program
           return { ...server, internalPort: port };
         });
 
-        console.log('');
         await startServers(serversWithPorts, processPrefix, printProgress);
       }
 
-      console.log('\nSyncing to Claude Code config...');
+      console.log('');
       const syncResult = syncToClaudeConfig(config);
-      console.log(`  ✓ Updated ${syncResult.path}`);
-      console.log(`    Servers: ${syncResult.servers.join(', ')}`);
-
-      console.log('\nMCP servers are running via pm2.');
-      console.log('Use "mcp-compose status" to check status.');
-      console.log('Use "mcp-compose logs" to view logs.');
+      console.log(`  ✓ Synced ${syncResult.path}`);
     } catch (err) {
       handleError(err);
     }

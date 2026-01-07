@@ -7,7 +7,7 @@ import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
 export type ProgressCallback = (event: ProgressEvent) => void;
 
 export interface ProgressEvent {
-  type: 'starting' | 'started' | 'stopping' | 'stopped' | 'port_skipped' | 'checking_ports';
+  type: 'starting' | 'started' | 'recreating' | 'recreated' | 'up_to_date' | 'stopping' | 'stopped' | 'port_skipped' | 'checking_ports';
   server: string;
   port?: number;
   originalPort?: number;
@@ -23,6 +23,9 @@ interface Pm2EnvWithMarker {
   status?: string;
   pm_uptime?: number;
   restart_time?: number;
+  pm_exec_path?: string;
+  args?: string[];
+  env?: Record<string, string>;
 }
 
 /**
@@ -112,6 +115,49 @@ function getProcessName(serverName: string, prefix: string): string {
 }
 
 /**
+ * Get a running process by name
+ */
+async function getRunningProcess(processName: string): Promise<ProcessDescription | null> {
+  const list = await pm2List();
+  return list.find((p) => p.name === processName) ?? null;
+}
+
+/**
+ * Check if the process configuration matches the desired configuration
+ */
+function isProcessConfigMatch(
+  process: ProcessDescription,
+  script: string,
+  args: string[],
+  env: Record<string, string>
+): boolean {
+  const pm2Env = process.pm2_env as Pm2EnvWithMarker | undefined;
+  if (!pm2Env) return false;
+
+  // Check if process is online
+  if (pm2Env.status !== 'online') return false;
+
+  // Check script path
+  if (pm2Env.pm_exec_path !== script) return false;
+
+  // Check args (pm2 stores them as array)
+  const currentArgs = pm2Env.args ?? [];
+  if (currentArgs.length !== args.length) return false;
+  for (let i = 0; i < args.length; i++) {
+    if (currentArgs[i] !== args[i]) return false;
+  }
+
+  // Check env vars (only the ones we care about, excluding MCP_COMPOSE_MARKER)
+  const currentEnv = pm2Env.env ?? {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === MCP_COMPOSE_MARKER) continue;
+    if (currentEnv[key] !== value) return false;
+  }
+
+  return true;
+}
+
+/**
  * Check if a process is managed by mcp-compose by looking for the marker env var
  */
 function isManagedProcess(p: ProcessDescription): p is ProcessDescription & { name: string; pm2_env: Pm2EnvWithMarker } {
@@ -142,8 +188,30 @@ export function startServers(
       const processName = getProcessName(name, prefix);
       const cmd = buildSupergatewayCmdForServer({ ...server, resourceLimits });
 
+      const envWithMarker = {
+        ...server.env,
+        [MCP_COMPOSE_MARKER]: name,
+      };
+
+      // Check if process is already running with the same configuration
+      const existingProcess = await getRunningProcess(processName);
+      if (existingProcess && isProcessConfigMatch(existingProcess, cmd.script, cmd.args, envWithMarker)) {
+        onProgress?.({
+          type: 'up_to_date',
+          server: name,
+          port: server.internalPort,
+          current,
+          total,
+        });
+        results.push({ name, processName, port: server.internalPort });
+        continue;
+      }
+
+      // Determine if this is a new start or recreate
+      const isRecreate = existingProcess !== null;
+
       onProgress?.({
-        type: 'starting',
+        type: isRecreate ? 'recreating' : 'starting',
         server: name,
         port: server.internalPort,
         current,
@@ -156,10 +224,7 @@ export function startServers(
         name: processName,
         script: cmd.script,
         args: cmd.args,
-        env: {
-          ...server.env,
-          [MCP_COMPOSE_MARKER]: name, // Mark as managed and store server name
-        },
+        env: envWithMarker,
         autorestart: true,
         max_restarts: resourceLimits.maxRestarts ?? 10,
         restart_delay: resourceLimits.restartDelay ?? 1000,
@@ -176,7 +241,7 @@ export function startServers(
       await pm2Start(startOptions);
 
       onProgress?.({
-        type: 'started',
+        type: isRecreate ? 'recreated' : 'started',
         server: name,
         port: server.internalPort,
         current,
