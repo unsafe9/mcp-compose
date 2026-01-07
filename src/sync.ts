@@ -1,19 +1,28 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import type {
+  NormalizedConfig,
+  ClaudeConfig,
+  ClaudeServerConfig,
+  SyncResult,
+  RemoveResult,
+} from './types.js';
 
-export function generateClaudeConfig(config) {
+function generateClaudeConfig(
+  config: NormalizedConfig
+): Record<string, ClaudeServerConfig> {
   const { mcpServers } = config;
-  const claudeConfig = {};
+  const claudeConfig: Record<string, ClaudeServerConfig> = {};
 
   for (const [name, server] of Object.entries(mcpServers)) {
     if (server.type === 'stdio') {
       claudeConfig[name] = {
         type: 'sse',
-        url: `http://localhost:${server.internalPort}/sse`
+        url: `http://localhost:${String(server.internalPort)}/sse`,
       };
     } else {
       claudeConfig[name] = {
         type: server.type,
-        url: server.url
+        url: server.url,
       };
     }
   }
@@ -21,15 +30,15 @@ export function generateClaudeConfig(config) {
   return claudeConfig;
 }
 
-export function syncToClaudeConfig(config) {
+export function syncToClaudeConfig(config: NormalizedConfig): SyncResult {
   const { settings } = config;
   const claudeConfigPath = settings.claudeConfigPath;
 
-  let existingConfig = {};
+  let existingConfig: ClaudeConfig = {};
   if (existsSync(claudeConfigPath)) {
     try {
       const content = readFileSync(claudeConfigPath, 'utf-8');
-      existingConfig = JSON.parse(content);
+      existingConfig = JSON.parse(content) as ClaudeConfig;
     } catch {
       existingConfig = {};
     }
@@ -37,22 +46,28 @@ export function syncToClaudeConfig(config) {
 
   const newServers = generateClaudeConfig(config);
 
-  const mergedConfig = { ...existingConfig };
+  const mergedConfig: ClaudeConfig = { ...existingConfig };
   mergedConfig.mcpServers = { ...existingConfig.mcpServers };
   for (const [name, serverConfig] of Object.entries(newServers)) {
     mergedConfig.mcpServers[name] = serverConfig;
   }
 
-  writeFileSync(claudeConfigPath, JSON.stringify(mergedConfig, null, 2) + '\n');
+  writeFileSync(
+    claudeConfigPath,
+    JSON.stringify(mergedConfig, null, 2) + '\n'
+  );
 
   return {
     path: claudeConfigPath,
     servers: Object.keys(newServers),
-    merged: Object.keys(existingConfig.mcpServers || {}).length > 0
+    merged: Object.keys(existingConfig.mcpServers ?? {}).length > 0,
   };
 }
 
-export function removeFromClaudeConfig(config, serverNames = null) {
+export function removeFromClaudeConfig(
+  config: NormalizedConfig,
+  serverNames: string[] | null = null
+): RemoveResult {
   const { settings, mcpServers } = config;
   const claudeConfigPath = settings.claudeConfigPath;
 
@@ -60,10 +75,10 @@ export function removeFromClaudeConfig(config, serverNames = null) {
     return { path: claudeConfigPath, removed: [] };
   }
 
-  let existingConfig;
+  let existingConfig: ClaudeConfig;
   try {
     const content = readFileSync(claudeConfigPath, 'utf-8');
-    existingConfig = JSON.parse(content);
+    existingConfig = JSON.parse(content) as ClaudeConfig;
   } catch {
     return { path: claudeConfigPath, removed: [] };
   }
@@ -72,20 +87,24 @@ export function removeFromClaudeConfig(config, serverNames = null) {
     return { path: claudeConfigPath, removed: [] };
   }
 
-  const toRemove = serverNames || Object.keys(mcpServers);
-  const removed = [];
+  const toRemove = serverNames ?? Object.keys(mcpServers);
+  const removed: string[] = [];
 
   for (const name of toRemove) {
     if (existingConfig.mcpServers[name]) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete existingConfig.mcpServers[name];
       removed.push(name);
     }
   }
 
-  writeFileSync(claudeConfigPath, JSON.stringify(existingConfig, null, 2) + '\n');
+  writeFileSync(
+    claudeConfigPath,
+    JSON.stringify(existingConfig, null, 2) + '\n'
+  );
 
   return {
     path: claudeConfigPath,
-    removed
+    removed,
   };
 }
