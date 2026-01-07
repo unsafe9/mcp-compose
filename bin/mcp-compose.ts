@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createRequire } from 'module';
 import { Command } from 'commander';
 import {
   loadConfig,
@@ -8,9 +7,9 @@ import {
   getServerNames,
   allocatePorts,
 } from '../src/config.js';
+import pkg from '../package.json' with { type: 'json' };
 
-const require = createRequire(import.meta.url);
-const { version } = require('../package.json') as { version: string };
+const { version } = pkg;
 import {
   startServers,
   stopServers,
