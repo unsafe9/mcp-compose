@@ -2,21 +2,34 @@
 
 Orchestrate multiple MCP servers through a unified Streamable HTTP gateway. Converts stdio-based MCP servers to Streamable HTTP endpoints and manages them with pm2.
 
-## Quick Start
+## Installation
+
+No installation required - use `npx`. (RECOMMENDED)
 
 ```bash
-# Create config file (mcp-compose.json)
-npx mcp-compose up       # Start servers
-npx mcp-compose status   # Check status
-npx mcp-compose down     # Stop servers
+npx -y mcp-compose status
 ```
 
-No installation required - just use `npx`.
+You can add an alias to `~/.bashrc` or `~/.zshrc`:
+
+```bash
+alias mcp-compose='npx -y mcp-compose'
+```
 
 Or install globally:
 
 ```bash
 npm install -g mcp-compose
+```
+
+
+## Quick Start
+
+```bash
+# Create config file (mcp-compose.json)
+mcp-compose up       # Start servers
+mcp-compose status   # Check status
+mcp-compose down     # Stop servers
 ```
 
 ## Configuration
@@ -72,13 +85,13 @@ Add `"disabled": true` to skip a server without removing its config.
 ## CLI Reference
 
 ```
-npx mcp-compose up [servers...]      Start all or specific servers
-npx mcp-compose down [servers...]    Stop servers
-npx mcp-compose restart [servers...] Restart servers
-npx mcp-compose status               Show running servers
-npx mcp-compose logs [server] [-f]   View logs (follow with -f)
-npx mcp-compose startup              Enable auto-start on boot
-npx mcp-compose unstartup            Disable auto-start
+mcp-compose up [servers...]      Start all or specific servers
+mcp-compose down [servers...]    Stop servers
+mcp-compose restart [servers...] Restart servers
+mcp-compose status               Show running servers
+mcp-compose logs [server] [-f]   View logs (follow with -f)
+mcp-compose startup              Enable auto-start on boot
+mcp-compose unstartup            Disable auto-start
 ```
 
 Options:
