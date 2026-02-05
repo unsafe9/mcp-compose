@@ -45,7 +45,8 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "pm2": "^5.4.3"
+    "pm2": "^5.4.3",
+    "string-env-interpolation": "^1.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

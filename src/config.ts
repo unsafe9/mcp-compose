@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs';
 import { createServer } from 'net';
 import { homedir } from 'os';
 import { resolve } from 'path';
+import { env } from 'string-env-interpolation';
 import type {
   Settings,
   RawConfig,
@@ -66,9 +67,10 @@ export function loadConfig(configPath?: string): NormalizedConfig {
   }
 
   const content = readFileSync(resolvedPath, 'utf-8');
+  const expandedContent = env(content);
   let config: unknown;
   try {
-    config = JSON.parse(content);
+    config = JSON.parse(expandedContent);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Invalid JSON in config file: ${message}`);
