@@ -3,6 +3,7 @@ import { createServer } from 'net';
 import { homedir } from 'os';
 import { resolve } from 'path';
 import { env } from 'string-env-interpolation';
+import stripJsonComments from 'strip-json-comments';
 import type {
   Settings,
   RawConfig,
@@ -67,7 +68,8 @@ export function loadConfig(configPath?: string): NormalizedConfig {
   }
 
   const content = readFileSync(resolvedPath, 'utf-8');
-  const expandedContent = env(content);
+  const strippedContent = stripJsonComments(content);
+  const expandedContent = env(strippedContent);
   let config: unknown;
   try {
     config = JSON.parse(expandedContent);
