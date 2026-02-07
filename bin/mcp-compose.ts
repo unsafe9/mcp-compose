@@ -5,7 +5,6 @@ import {
   loadConfig,
   getStdioServers,
   getServerNames,
-  allocatePorts,
 } from '../src/config.js';
 import pkg from '../package.json' with { type: 'json' };
 
@@ -76,7 +75,7 @@ program
   .action(async (servers: string[], _options: unknown, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
-      const { processPrefix } = config.settings;
+      const { processPrefix, portBase } = config.settings;
       const stdioServers = getStdioServers(config);
       const filteredServers =
         servers.length > 0
@@ -90,25 +89,15 @@ program
       }
 
       if (filteredServers.length > 0) {
-        // Check port availability and allocate ports
-        const ports = await allocatePorts(
-          filteredServers.length,
-          config.settings.portBase,
-          (originalPort, assignedPort) => {
-            console.log(`  ⚠ Port ${String(originalPort)} in use, using ${String(assignedPort)} instead`);
-          }
-        );
+        const results = await startServers(filteredServers, processPrefix, portBase, printProgress);
 
-        // Update servers with allocated ports
-        const serversWithPorts = filteredServers.map((server, i) => {
-          const port = ports[i];
-          if (port === undefined) {
-            throw new Error(`Port allocation failed for server ${server.name}`);
+        // Update config with actual running ports before syncing
+        for (const result of results) {
+          const server = config.mcpServers[result.name];
+          if (server?.type === 'stdio') {
+            server.internalPort = result.port;
           }
-          return { ...server, internalPort: port };
-        });
-
-        await startServers(serversWithPorts, processPrefix, printProgress);
+        }
       }
 
       console.log('');

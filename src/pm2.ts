@@ -1,7 +1,9 @@
 import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
+import { basename } from 'path';
 import { spawn } from 'child_process';
 import { buildSupergatewayCmdForServer } from './supergateway.js';
+import { isPortAvailable } from './config.js';
 import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
 
 export type ProgressCallback = (event: ProgressEvent) => void;
@@ -123,6 +125,24 @@ async function getRunningProcess(processName: string): Promise<ProcessDescriptio
 }
 
 /**
+ * Extract the port number from a running process's args (--port <number>)
+ */
+function extractPortFromProcess(process: ProcessDescription): number | null {
+  const pm2Env = process.pm2_env as Pm2EnvWithMarker | undefined;
+  if (!pm2Env) return null;
+
+  const args = pm2Env.args ?? [];
+  const portIndex = args.indexOf('--port');
+  if (portIndex === -1 || portIndex + 1 >= args.length) return null;
+
+  const portStr = args[portIndex + 1];
+  if (portStr === undefined) return null;
+
+  const port = parseInt(portStr, 10);
+  return isNaN(port) ? null : port;
+}
+
+/**
  * Check if the process configuration matches the desired configuration
  */
 function isProcessConfigMatch(
@@ -137,8 +157,11 @@ function isProcessConfigMatch(
   // Check if process is online
   if (pm2Env.status !== 'online') return false;
 
-  // Check script path
-  if (pm2Env.pm_exec_path !== script) return false;
+  // Check script path (pm2 resolves to full path, so compare basenames)
+  const currentScript = pm2Env.pm_exec_path ?? '';
+  if (currentScript !== script && basename(currentScript) !== basename(script)) {
+    return false;
+  }
 
   // Check args (pm2 stores them as array)
   const currentArgs = pm2Env.args ?? [];
@@ -175,50 +198,136 @@ function getServerNameFromProcess(p: ProcessDescription & { name: string; pm2_en
 export function startServers(
   servers: NamedStdioServer[],
   prefix: string,
+  portBase: number,
   onProgress?: ProgressCallback
 ): Promise<StartResult[]> {
   return withPm2(async () => {
-    const results: StartResult[] = [];
     const total = servers.length;
-    let current = 0;
+
+    // Phase 1: Check which servers are up-to-date vs need (re)starting
+    interface ServerState {
+      server: NamedStdioServer;
+      existingProcess: ProcessDescription | null;
+      upToDate: boolean;
+      port: number;
+    }
+
+    const serverStates: ServerState[] = [];
 
     for (const serverEntry of servers) {
-      current++;
       const { name, resourceLimits, ...server } = serverEntry;
       const processName = getProcessName(name, prefix);
-      const cmd = buildSupergatewayCmdForServer({ ...server, resourceLimits });
-
-      const envWithMarker = {
-        ...server.env,
-        [MCP_COMPOSE_MARKER]: name,
-      };
-
-      // Check if process is already running with the same configuration
       const existingProcess = await getRunningProcess(processName);
-      if (existingProcess && isProcessConfigMatch(existingProcess, cmd.script, cmd.args, envWithMarker)) {
+
+      if (existingProcess) {
+        const existingPort = extractPortFromProcess(existingProcess);
+
+        if (existingPort !== null) {
+          // Compare config using the existing port (not the newly suggested one)
+          const cmdForComparison = buildSupergatewayCmdForServer({
+            ...server,
+            internalPort: existingPort,
+            resourceLimits,
+          });
+          const envWithMarker = {
+            ...server.env,
+            [MCP_COMPOSE_MARKER]: name,
+          };
+
+          if (isProcessConfigMatch(existingProcess, cmdForComparison.script, cmdForComparison.args, envWithMarker)) {
+            serverStates.push({
+              server: serverEntry,
+              existingProcess,
+              upToDate: true,
+              port: existingPort,
+            });
+            continue;
+          }
+        }
+      }
+
+      serverStates.push({
+        server: serverEntry,
+        existingProcess,
+        upToDate: false,
+        port: 0, // will be allocated in phase 2
+      });
+    }
+
+    // Phase 2: Allocate ports only for servers that need (re)starting
+    const usedPorts = new Set(
+      serverStates.filter((s) => s.upToDate).map((s) => s.port)
+    );
+    let nextPort = portBase;
+
+    for (const state of serverStates) {
+      if (state.upToDate) continue;
+
+      // Find next available port, skipping ports used by up-to-date servers
+      while (usedPorts.has(nextPort) || !(await isPortAvailable(nextPort))) {
+        nextPort++;
+        if (nextPort > 65535) {
+          throw new Error('No available ports found');
+        }
+      }
+
+      if (nextPort !== state.server.internalPort) {
+        onProgress?.({
+          type: 'port_skipped',
+          server: state.server.name,
+          originalPort: state.server.internalPort,
+          port: nextPort,
+        });
+      }
+
+      state.port = nextPort;
+      usedPorts.add(nextPort);
+      nextPort++;
+    }
+
+    // Phase 3: Apply changes
+    const results: StartResult[] = [];
+    let current = 0;
+
+    for (const state of serverStates) {
+      current++;
+      const { name, resourceLimits, ...server } = state.server;
+      const processName = getProcessName(name, prefix);
+
+      if (state.upToDate) {
         onProgress?.({
           type: 'up_to_date',
           server: name,
-          port: server.internalPort,
+          port: state.port,
           current,
           total,
         });
-        results.push({ name, processName, port: server.internalPort });
+        results.push({ name, processName, port: state.port });
         continue;
       }
 
-      // Determine if this is a new start or recreate
-      const isRecreate = existingProcess !== null;
+      const isRecreate = state.existingProcess !== null;
 
       onProgress?.({
         type: isRecreate ? 'recreating' : 'starting',
         server: name,
-        port: server.internalPort,
+        port: state.port,
         current,
         total,
       });
 
       await pm2Delete(processName);
+
+      const cmd = buildSupergatewayCmdForServer({
+        ...server,
+        internalPort: state.port,
+        resourceLimits,
+      });
+
+      const envWithMarker = {
+        ...server.env,
+        [MCP_COMPOSE_MARKER]: name,
+      };
 
       const startOptions: StartOptions = {
         name: processName,
@@ -230,7 +339,6 @@ export function startServers(
         restart_delay: resourceLimits.restartDelay ?? 1000,
       };
 
-      // Add memory limit if specified
       if (resourceLimits.maxMemory !== undefined) {
         const maxMemory = parseMemoryLimit(resourceLimits.maxMemory);
         if (maxMemory) {
@@ -243,12 +351,12 @@ export function startServers(
       onProgress?.({
         type: isRecreate ? 'recreated' : 'started',
         server: name,
-        port: server.internalPort,
+        port: state.port,
         current,
         total,
       });
 
-      results.push({ name, processName, port: server.internalPort });
+      results.push({ name, processName, port: state.port });
     }
 
     return results;
