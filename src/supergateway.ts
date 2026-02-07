@@ -19,6 +19,7 @@ export function buildSupergatewayCmdForServer(server: StdioServer): Supergateway
       String(internalPort),
       '--logLevel',
       logLevel,
+      '--stateful',
     ],
   };
 }
