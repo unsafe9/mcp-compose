@@ -202,11 +202,12 @@ program
   .description('View server logs')
   .argument('[server]', 'Server name (default: all)')
   .option('-f, --follow', 'Follow log output')
-  .action((server: string | undefined, options: { follow?: boolean }, cmd: Command) => {
+  .option('--err', 'Only show error logs')
+  .action((server: string | undefined, options: { follow?: boolean; err?: boolean }, cmd: Command) => {
     try {
       const config = loadConfig(getConfigPath(cmd));
       const { processPrefix } = config.settings;
-      streamLogs(server, processPrefix, options.follow);
+      streamLogs(server, processPrefix, { follow: options.follow, err: options.err });
     } catch (err) {
       handleError(err);
     }

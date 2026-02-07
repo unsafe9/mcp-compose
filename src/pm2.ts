@@ -430,13 +430,20 @@ export function getStatus(): Promise<ServerStatus[]> {
   });
 }
 
-export function streamLogs(serverName?: string, prefix?: string, follow?: boolean): ReturnType<typeof spawn> {
+export function streamLogs(
+  serverName?: string,
+  prefix?: string,
+  options?: { follow?: boolean | undefined; err?: boolean | undefined }
+): ReturnType<typeof spawn> {
   const args = ['pm2', 'logs'];
   if (serverName && prefix) {
     args.push(getProcessName(serverName, prefix));
   }
-  if (!follow) {
+  if (!options?.follow) {
     args.push('--nostream');
+  }
+  if (options?.err) {
+    args.push('--err');
   }
   return spawn('npx', args, { stdio: 'inherit' });
 }
