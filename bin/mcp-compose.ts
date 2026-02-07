@@ -13,6 +13,7 @@ import {
   startServers,
   stopServers,
   stopAllManagedServers,
+  stopOrphanedServers,
   restartServers,
   getStatus,
   streamLogs,
@@ -97,6 +98,16 @@ program
           if (server?.type === 'stdio') {
             server.internalPort = result.port;
           }
+        }
+      }
+
+      // When starting all servers, clean up orphaned processes from removed servers
+      if (servers.length === 0) {
+        const allServerNames = Object.keys(config.mcpServers);
+        const orphaned = await stopOrphanedServers(allServerNames, processPrefix, printProgress);
+        if (orphaned.length > 0) {
+          console.log('');
+          console.log(`  Cleaned up ${String(orphaned.length)} removed server(s): ${orphaned.join(', ')}`);
         }
       }
 

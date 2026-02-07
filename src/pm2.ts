@@ -1,7 +1,7 @@
 import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
 import { basename } from 'path';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { buildSupergatewayCmdForServer } from './supergateway.js';
 import { isPortAvailable } from './config.js';
 import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
@@ -195,6 +195,56 @@ function getServerNameFromProcess(p: ProcessDescription & { name: string; pm2_en
   return p.pm2_env[MCP_COMPOSE_MARKER] ?? p.name;
 }
 
+/**
+ * Recursively collect all descendant PIDs of a given PID.
+ * Uses pgrep -P to find children at each level.
+ */
+function getDescendantPids(pid: number): number[] {
+  const descendants: number[] = [];
+  try {
+    const output = execSync(`pgrep -P ${String(pid)}`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!output) return descendants;
+
+    for (const line of output.split('\n')) {
+      const childPid = parseInt(line, 10);
+      if (!isNaN(childPid)) {
+        descendants.push(childPid);
+        descendants.push(...getDescendantPids(childPid));
+      }
+    }
+  } catch {
+    // pgrep exits with 1 when no children found
+  }
+  return descendants;
+}
+
+/**
+ * Collect all descendant PIDs from a pm2-managed process.
+ * Must be called BEFORE pm2Delete so the process tree is still alive.
+ */
+function collectDescendantPids(proc: ProcessDescription | null): number[] {
+  if (!proc?.pid) return [];
+  return getDescendantPids(proc.pid);
+}
+
+/**
+ * Kill specific PIDs that survived after their parent was stopped.
+ * Only targets exact PIDs collected from the process tree — safe
+ * against killing unrelated processes.
+ */
+function killSurvivorPids(pids: number[]): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process already dead
+    }
+  }
+}
+
 export function startServers(
   servers: NamedStdioServer[],
   prefix: string,
@@ -316,7 +366,9 @@ export function startServers(
         total,
       });
 
+      const descendantPids = collectDescendantPids(state.existingProcess);
       await pm2Delete(processName);
+      killSurvivorPids(descendantPids);
 
       const cmd = buildSupergatewayCmdForServer({
         ...server,
@@ -374,6 +426,8 @@ export function stopServers(
 
     for (const name of serverNames) {
       current++;
+      const processName = getProcessName(name, prefix);
+
       onProgress?.({
         type: 'stopping',
         server: name,
@@ -381,7 +435,10 @@ export function stopServers(
         total,
       });
 
-      await pm2Delete(getProcessName(name, prefix));
+      const proc = await getRunningProcess(processName);
+      const descendantPids = collectDescendantPids(proc);
+      await pm2Delete(processName);
+      killSurvivorPids(descendantPids);
 
       onProgress?.({
         type: 'stopped',
@@ -398,11 +455,54 @@ export function stopAllManagedServers(): Promise<number> {
     const list = await pm2List();
     const managedProcesses = list.filter(isManagedProcess);
 
+    // Collect all descendant PIDs before deleting
+    const allDescendantPids = managedProcesses.flatMap(collectDescendantPids);
+
     for (const proc of managedProcesses) {
       await pm2Delete(proc.name);
     }
 
+    killSurvivorPids(allDescendantPids);
+
     return managedProcesses.length;
+  });
+}
+
+/**
+ * Stop managed processes that are not in the given server list.
+ * Returns the names of stopped orphaned processes.
+ */
+export function stopOrphanedServers(
+  activeServerNames: string[],
+  prefix: string,
+  onProgress?: ProgressCallback
+): Promise<string[]> {
+  return withPm2(async () => {
+    const list = await pm2List();
+    const managedProcesses = list.filter(isManagedProcess);
+
+    const activeProcessNames = new Set(
+      activeServerNames.map((name) => getProcessName(name, prefix))
+    );
+
+    const orphaned: string[] = [];
+    for (const proc of managedProcesses) {
+      if (!activeProcessNames.has(proc.name)) {
+        const serverName = getServerNameFromProcess(proc);
+        onProgress?.({
+          type: 'stopping',
+          server: serverName,
+        });
+        await pm2Delete(proc.name);
+        onProgress?.({
+          type: 'stopped',
+          server: serverName,
+        });
+        orphaned.push(serverName);
+      }
+    }
+
+    return orphaned;
   });
 }
 
