@@ -2,7 +2,7 @@ import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
 import { basename } from 'path';
 import { spawn, execSync } from 'child_process';
-import { buildSupergatewayCmdForServer } from './supergateway.js';
+import { buildSupergatewayCmdForServer, resolveSupergatewayBin } from './supergateway.js';
 import { isPortAvailable } from './config.js';
 import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
 
@@ -253,6 +253,7 @@ export function startServers(
 ): Promise<StartResult[]> {
   return withPm2(async () => {
     const total = servers.length;
+    const supergatewayBin = resolveSupergatewayBin();
 
     // Phase 1: Check which servers are up-to-date vs need (re)starting
     interface ServerState {
@@ -278,7 +279,7 @@ export function startServers(
             ...server,
             internalPort: existingPort,
             resourceLimits,
-          });
+          }, supergatewayBin);
           const envWithMarker = {
             ...server.env,
             [MCP_COMPOSE_MARKER]: name,
@@ -374,7 +375,7 @@ export function startServers(
         ...server,
         internalPort: state.port,
         resourceLimits,
-      });
+      }, supergatewayBin);
 
       const envWithMarker = {
         ...server.env,
@@ -385,6 +386,7 @@ export function startServers(
         name: processName,
         script: cmd.script,
         args: cmd.args,
+        interpreter: 'none',
         env: envWithMarker,
         autorestart: true,
         max_restarts: resourceLimits.maxRestarts ?? 10,
