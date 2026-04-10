@@ -2,7 +2,7 @@ import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
 import { basename } from 'path';
 import { spawn, execSync } from 'child_process';
-import { buildSupergatewayCmdForServer, resolveSupergatewayBin } from './supergateway.js';
+import { buildSupergatewayCmdForServer, resolveSupergatewayBin, resolveMcpRemoteBin } from './supergateway.js';
 import { isPortAvailable } from './config.js';
 import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
 
@@ -255,6 +255,10 @@ export function startServers(
     const total = servers.length;
     const supergatewayBin = resolveSupergatewayBin();
 
+    // Resolve mcp-remote binary if any server uses it (proxy mode for remote servers)
+    const needsMcpRemote = servers.some((s) => s.command === 'mcp-remote');
+    const mcpRemoteBin = needsMcpRemote ? resolveMcpRemoteBin() : undefined;
+
     // Phase 1: Check which servers are up-to-date vs need (re)starting
     interface ServerState {
       server: NamedStdioServer;
@@ -275,8 +279,10 @@ export function startServers(
 
         if (existingPort !== null) {
           // Compare config using the existing port (not the newly suggested one)
+          const resolvedCommand = mcpRemoteBin && server.command === 'mcp-remote' ? mcpRemoteBin : server.command;
           const cmdForComparison = buildSupergatewayCmdForServer({
             ...server,
+            command: resolvedCommand,
             internalPort: existingPort,
             resourceLimits,
           }, supergatewayBin);
@@ -371,8 +377,10 @@ export function startServers(
       await pm2Delete(processName);
       killSurvivorPids(descendantPids);
 
+      const resolvedCommand = mcpRemoteBin && server.command === 'mcp-remote' ? mcpRemoteBin : server.command;
       const cmd = buildSupergatewayCmdForServer({
         ...server,
+        command: resolvedCommand,
         internalPort: state.port,
         resourceLimits,
       }, supergatewayBin);

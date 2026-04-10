@@ -27,6 +27,10 @@ export interface RawRemoteServer {
   type: 'sse' | 'http';
   url: string;
   disabled?: boolean;
+  proxy?: boolean;
+  headers?: Record<string, string>;
+  logLevel?: LogLevel;
+  resourceLimits?: ResourceLimits;
 }
 
 export type RawServerConfig = RawStdioServer | RawRemoteServer;

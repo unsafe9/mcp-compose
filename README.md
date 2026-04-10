@@ -101,7 +101,7 @@ Runs a local command and wraps it with supergateway to expose as HTTP.
 
 #### sse/http - Remote Server
 
-Passthrough to remote MCP servers. No local process is started.
+Passthrough to remote MCP servers. No local process is started by default.
 
 ```json
 {
@@ -117,6 +117,45 @@ Passthrough to remote MCP servers. No local process is started.
 | `type` | `"sse"` or `"http"` | Yes | Server type |
 | `url` | string | Yes | Remote server URL |
 | `disabled` | boolean | No | Skip this server |
+| `proxy` | boolean | No | Enable local proxy with OAuth support (see below) |
+| `headers` | object | No | Custom headers to send to the remote server (proxy mode only) |
+| `logLevel` | string | No | Override log level (proxy mode only) |
+| `resourceLimits` | object | No | Process resource limits (proxy mode only) |
+
+#### Remote Server with OAuth Proxy
+
+Remote servers with `"proxy": true` are wrapped with [mcp-remote](https://github.com/geelen/mcp-remote) to handle OAuth token lifecycle automatically. This solves the common issue where OAuth tokens expire and break MCP connections between sessions.
+
+```json
+{
+  "notion": {
+    "type": "http",
+    "url": "https://mcp.notion.so/mcp",
+    "proxy": true
+  }
+}
+```
+
+When proxy is enabled:
+- A local process is started (managed by pm2, just like stdio servers)
+- [mcp-remote](https://github.com/geelen/mcp-remote) handles the full OAuth 2.0 flow (PKCE, browser-based consent, automatic token refresh)
+- Tokens are cached at `~/.mcp-auth/` and refreshed automatically when they expire
+- The first run opens a browser for OAuth consent; subsequent runs reuse cached tokens
+
+You can also pass custom headers for API key authentication:
+
+```json
+{
+  "my-api": {
+    "type": "http",
+    "url": "https://mcp.example.com/mcp",
+    "proxy": true,
+    "headers": {
+      "Authorization": "Bearer ${API_KEY}"
+    }
+  }
+}
+```
 
 ### Resource Limits
 
@@ -180,6 +219,11 @@ Add `"disabled": true` to skip a server without removing its config:
       "type": "http",
       "url": "https://mcp.aws.example.com/mcp"
     },
+    "notion": {
+      "type": "http",
+      "url": "https://mcp.notion.so/mcp",
+      "proxy": true
+    },
     "experimental": {
       "command": "node",
       "args": ["./my-experimental-server.js"],
@@ -236,8 +280,9 @@ mcp-compose logs -f
 
 1. **stdio servers**: Started via pm2 using `supergateway` to expose Streamable HTTP endpoints
 2. **Remote servers**: Registered directly (no local process)
-3. **Config sync**: Auto-updates `~/.mcp.json` for Claude Code integration
-4. **Port allocation**: Automatically detects port conflicts and uses next available port
+3. **Remote servers with proxy**: Wrapped with `mcp-remote` + `supergateway` for OAuth token lifecycle management
+4. **Config sync**: Auto-updates `~/.mcp.json` for Claude Code integration
+5. **Port allocation**: Automatically detects port conflicts and uses next available port
 
 Each stdio server gets an internal port starting from `portBase` (default 19100). If a port is in use, the next available port is automatically selected.
 

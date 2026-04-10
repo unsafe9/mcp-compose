@@ -21,6 +21,24 @@ export function resolveSupergatewayBin(): string {
   return bin;
 }
 
+/**
+ * Ensure mcp-remote is installed and return the resolved binary path.
+ * Used for proxying remote MCP servers with OAuth token lifecycle management.
+ */
+export function resolveMcpRemoteBin(): string {
+  const bin = execSync('npx -y -p mcp-remote@latest -c "which mcp-remote"', {
+    encoding: 'utf-8',
+    timeout: 60_000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+
+  if (!bin) {
+    throw new Error('Failed to resolve mcp-remote binary path');
+  }
+
+  return bin;
+}
+
 export function buildSupergatewayCmdForServer(server: StdioServer, supergatewayBin: string): SupergatewayCommand {
   const { command, args, internalPort, logLevel } = server;
 

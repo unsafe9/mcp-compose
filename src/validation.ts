@@ -160,6 +160,37 @@ function validateRemoteServer(
       addError(errors, `${path}.url`, 'must be a valid URL');
     }
   }
+
+  if ('proxy' in server && typeof server['proxy'] !== 'boolean') {
+    addError(errors, `${path}.proxy`, 'must be a boolean');
+  }
+
+  if ('headers' in server) {
+    const headers = server['headers'];
+    if (!isObject(headers)) {
+      addError(errors, `${path}.headers`, 'must be an object');
+    } else {
+      for (const [key, value] of Object.entries(headers)) {
+        if (typeof value !== 'string') {
+          addError(errors, `${path}.headers.${key}`, 'must be a string');
+        }
+      }
+    }
+  }
+
+  if ('logLevel' in server) {
+    if (!VALID_LOG_LEVELS.includes(server['logLevel'] as LogLevel)) {
+      addError(
+        errors,
+        `${path}.logLevel`,
+        `must be one of: ${VALID_LOG_LEVELS.join(', ')}`
+      );
+    }
+  }
+
+  if ('resourceLimits' in server) {
+    validateResourceLimits(server['resourceLimits'], `${path}.resourceLimits`, errors);
+  }
 }
 
 function validateServer(

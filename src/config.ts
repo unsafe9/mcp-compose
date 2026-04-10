@@ -202,10 +202,42 @@ function normalizeServer(
     throw new Error(`Server "${name}" is ${type} type but missing url`);
   }
 
+  // Proxy mode: wrap remote server with mcp-remote for OAuth lifecycle management
+  if ('proxy' in server && server.proxy) {
+    const headers = 'headers' in server ? server.headers as Record<string, string> | undefined : undefined;
+    return {
+      type: 'stdio',
+      command: 'mcp-remote',
+      args: buildMcpRemoteArgs(server.url, type, headers),
+      env: {},
+      internalPort,
+      logLevel: server.logLevel ?? settings.logLevel,
+      resourceLimits: { ...DEFAULT_RESOURCE_LIMITS, ...server.resourceLimits },
+    };
+  }
+
   return {
     type,
     url: server.url,
   };
+}
+
+function buildMcpRemoteArgs(
+  url: string,
+  transport: 'sse' | 'http',
+  headers?: Record<string, string>
+): string[] {
+  const args = [url];
+
+  args.push('--transport', transport === 'sse' ? 'sse-only' : 'http-only');
+
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      args.push('--header', `${key}:${value}`);
+    }
+  }
+
+  return args;
 }
 
 export function getServerNames(
