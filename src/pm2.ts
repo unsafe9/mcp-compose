@@ -259,6 +259,10 @@ export function startServers(
     const needsMcpRemote = servers.some((s) => s.command === 'mcp-remote');
     const mcpRemoteBin = needsMcpRemote ? resolveMcpRemoteBin() : undefined;
 
+    function resolveCommand(command: string): string {
+      return mcpRemoteBin && command === 'mcp-remote' ? mcpRemoteBin : command;
+    }
+
     // Phase 1: Check which servers are up-to-date vs need (re)starting
     interface ServerState {
       server: NamedStdioServer;
@@ -279,10 +283,9 @@ export function startServers(
 
         if (existingPort !== null) {
           // Compare config using the existing port (not the newly suggested one)
-          const resolvedCommand = mcpRemoteBin && server.command === 'mcp-remote' ? mcpRemoteBin : server.command;
           const cmdForComparison = buildSupergatewayCmdForServer({
             ...server,
-            command: resolvedCommand,
+            command: resolveCommand(server.command),
             internalPort: existingPort,
             resourceLimits,
           }, supergatewayBin);
@@ -377,10 +380,9 @@ export function startServers(
       await pm2Delete(processName);
       killSurvivorPids(descendantPids);
 
-      const resolvedCommand = mcpRemoteBin && server.command === 'mcp-remote' ? mcpRemoteBin : server.command;
       const cmd = buildSupergatewayCmdForServer({
         ...server,
-        command: resolvedCommand,
+        command: resolveCommand(server.command),
         internalPort: state.port,
         resourceLimits,
       }, supergatewayBin);

@@ -21,6 +21,32 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function validateLogLevel(
+  value: unknown,
+  path: string,
+  errors: ValidationError[]
+): void {
+  if (!VALID_LOG_LEVELS.includes(value as LogLevel)) {
+    addError(errors, path, `must be one of: ${VALID_LOG_LEVELS.join(', ')}`);
+  }
+}
+
+function validateStringRecord(
+  value: unknown,
+  path: string,
+  errors: ValidationError[]
+): void {
+  if (!isObject(value)) {
+    addError(errors, path, 'must be an object');
+    return;
+  }
+  for (const [key, v] of Object.entries(value)) {
+    if (typeof v !== 'string') {
+      addError(errors, `${path}.${key}`, 'must be a string');
+    }
+  }
+}
+
 function validateSettings(
   settings: unknown,
   errors: ValidationError[]
@@ -48,13 +74,7 @@ function validateSettings(
   }
 
   if ('logLevel' in settings) {
-    if (!VALID_LOG_LEVELS.includes(settings['logLevel'] as LogLevel)) {
-      addError(
-        errors,
-        'settings.logLevel',
-        `must be one of: ${VALID_LOG_LEVELS.join(', ')}`
-      );
-    }
+    validateLogLevel(settings['logLevel'], 'settings.logLevel', errors);
   }
 }
 
@@ -118,26 +138,11 @@ function validateStdioServer(
   }
 
   if ('env' in server) {
-    const env = server['env'];
-    if (!isObject(env)) {
-      addError(errors, `${path}.env`, 'must be an object');
-    } else {
-      for (const [key, value] of Object.entries(env)) {
-        if (typeof value !== 'string') {
-          addError(errors, `${path}.env.${key}`, 'must be a string');
-        }
-      }
-    }
+    validateStringRecord(server['env'], `${path}.env`, errors);
   }
 
   if ('logLevel' in server) {
-    if (!VALID_LOG_LEVELS.includes(server['logLevel'] as LogLevel)) {
-      addError(
-        errors,
-        `${path}.logLevel`,
-        `must be one of: ${VALID_LOG_LEVELS.join(', ')}`
-      );
-    }
+    validateLogLevel(server['logLevel'], `${path}.logLevel`, errors);
   }
 
   if ('resourceLimits' in server) {
@@ -166,26 +171,11 @@ function validateRemoteServer(
   }
 
   if ('headers' in server) {
-    const headers = server['headers'];
-    if (!isObject(headers)) {
-      addError(errors, `${path}.headers`, 'must be an object');
-    } else {
-      for (const [key, value] of Object.entries(headers)) {
-        if (typeof value !== 'string') {
-          addError(errors, `${path}.headers.${key}`, 'must be a string');
-        }
-      }
-    }
+    validateStringRecord(server['headers'], `${path}.headers`, errors);
   }
 
   if ('logLevel' in server) {
-    if (!VALID_LOG_LEVELS.includes(server['logLevel'] as LogLevel)) {
-      addError(
-        errors,
-        `${path}.logLevel`,
-        `must be one of: ${VALID_LOG_LEVELS.join(', ')}`
-      );
-    }
+    validateLogLevel(server['logLevel'], `${path}.logLevel`, errors);
   }
 
   if ('resourceLimits' in server) {

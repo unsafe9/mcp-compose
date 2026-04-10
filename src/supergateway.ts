@@ -3,40 +3,31 @@ import { expandPath } from './config.js';
 import type { StdioServer, SupergatewayCommand } from './types.js';
 
 /**
- * Ensure supergateway is installed and return the resolved binary path.
- * Uses npx to install if needed, then resolves the real path so pm2 can
- * launch the binary directly without the npx wrapper process.
+ * Install an npm package (if needed) and return the resolved binary path.
+ * Uses npx to install, then resolves the real path so pm2 can launch
+ * the binary directly without the npx wrapper process.
  */
-export function resolveSupergatewayBin(): string {
-  const bin = execSync('npx -y -p supergateway@latest -c "which supergateway"', {
+function resolveNpxBinary(packageName: string): string {
+  const binName = packageName.replace(/@.*$/, '');
+  const bin = execSync(`npx -y -p ${packageName} -c "which ${binName}"`, {
     encoding: 'utf-8',
     timeout: 60_000,
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 
   if (!bin) {
-    throw new Error('Failed to resolve supergateway binary path');
+    throw new Error(`Failed to resolve ${binName} binary path`);
   }
 
   return bin;
 }
 
-/**
- * Ensure mcp-remote is installed and return the resolved binary path.
- * Used for proxying remote MCP servers with OAuth token lifecycle management.
- */
+export function resolveSupergatewayBin(): string {
+  return resolveNpxBinary('supergateway@latest');
+}
+
 export function resolveMcpRemoteBin(): string {
-  const bin = execSync('npx -y -p mcp-remote@latest -c "which mcp-remote"', {
-    encoding: 'utf-8',
-    timeout: 60_000,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-
-  if (!bin) {
-    throw new Error('Failed to resolve mcp-remote binary path');
-  }
-
-  return bin;
+  return resolveNpxBinary('mcp-remote@latest');
 }
 
 export function buildSupergatewayCmdForServer(server: StdioServer, supergatewayBin: string): SupergatewayCommand {
