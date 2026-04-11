@@ -66,7 +66,7 @@ function handleError(err: unknown): never {
 program
   .name('mcp-compose')
   .description('MCP server orchestration tool')
-  .version(version)
+  .version(version, '-v, --version')
   .option('-c, --config <path>', 'Path to config file');
 
 program
