@@ -11,7 +11,8 @@ import type {
   NormalizedConfig,
   NormalizedServer,
   StdioServer,
-  NamedStdioServer,
+  ProxyServer,
+  NamedManagedServer,
   ResourceLimits,
 } from './types.js';
 import { assertValidConfig } from './validation.js';
@@ -156,7 +157,7 @@ export function normalizeConfig(config: RawConfig): NormalizedConfig {
     const normalized = normalizeServer(name, server, settings.portBase + portIndex, settings);
     mcpServers[name] = normalized;
 
-    if (normalized.type === 'stdio') {
+    if (normalized.type === 'stdio' || normalized.type === 'proxy') {
       portIndex++;
     }
   }
@@ -202,14 +203,14 @@ function normalizeServer(
     throw new Error(`Server "${name}" is ${type} type but missing url`);
   }
 
-  // Proxy mode: wrap remote server with mcp-remote for OAuth lifecycle management
+  // Proxy mode: gateway connects directly to remote server with OAuth lifecycle management
   if ('proxy' in server && server.proxy) {
-    const headers = 'headers' in server ? server.headers as Record<string, string> | undefined : undefined;
+    const headers = 'headers' in server ? server.headers : undefined;
     return {
-      type: 'stdio',
-      command: 'mcp-remote',
-      args: buildMcpRemoteArgs(server.url, type, headers),
-      env: {},
+      type: 'proxy',
+      url: server.url,
+      transport: type,
+      headers: headers ?? {},
       internalPort,
       logLevel: server.logLevel ?? settings.logLevel,
       resourceLimits: { ...DEFAULT_RESOURCE_LIMITS, ...server.resourceLimits },
@@ -220,24 +221,6 @@ function normalizeServer(
     type,
     url: server.url,
   };
-}
-
-function buildMcpRemoteArgs(
-  url: string,
-  transport: 'sse' | 'http',
-  headers?: Record<string, string>
-): string[] {
-  const args = [url];
-
-  args.push('--transport', transport === 'sse' ? 'sse-only' : 'http-only');
-
-  if (headers) {
-    for (const [key, value] of Object.entries(headers)) {
-      args.push('--header', `${key}:${value}`);
-    }
-  }
-
-  return args;
 }
 
 export function getServerNames(
@@ -261,8 +244,9 @@ export function getServerNames(
   return filter;
 }
 
-export function getStdioServers(config: NormalizedConfig): NamedStdioServer[] {
+export function getManagedServers(config: NormalizedConfig): NamedManagedServer[] {
   return Object.entries(config.mcpServers)
-    .filter((entry): entry is [string, StdioServer] => entry[1].type === 'stdio')
+    .filter((entry): entry is [string, StdioServer | ProxyServer] =>
+      entry[1].type === 'stdio' || entry[1].type === 'proxy')
     .map(([name, server]) => ({ name, ...server }));
 }

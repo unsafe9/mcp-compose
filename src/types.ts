@@ -56,7 +56,17 @@ export interface RemoteServer {
   url: string;
 }
 
-export type NormalizedServer = StdioServer | RemoteServer;
+export interface ProxyServer {
+  type: 'proxy';
+  url: string;
+  transport: 'http' | 'sse';
+  headers: Record<string, string>;
+  internalPort: number;
+  logLevel: LogLevel;
+  resourceLimits: ResourceLimits;
+}
+
+export type NormalizedServer = StdioServer | RemoteServer | ProxyServer;
 
 export interface NormalizedConfig {
   settings: Settings;
@@ -68,7 +78,13 @@ export interface NamedStdioServer extends StdioServer {
   name: string;
 }
 
-export interface SupergatewayCommand {
+export interface NamedProxyServer extends ProxyServer {
+  name: string;
+}
+
+export type NamedManagedServer = NamedStdioServer | NamedProxyServer;
+
+export interface GatewayCommand {
   script: string;
   args: string[];
 }

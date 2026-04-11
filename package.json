@@ -4,7 +4,8 @@
   "description": "MCP server orchestration tool - manage multiple MCP servers with a single gateway",
   "type": "module",
   "bin": {
-    "mcp-compose": "./dist/bin/mcp-compose.js"
+    "mcp-compose": "./dist/bin/mcp-compose.js",
+    "mcp-gateway": "./dist/bin/mcp-gateway.js"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -18,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && cp package.json dist/",
+    "build": "tsc && cp package.json dist/ && chmod +x dist/bin/mcp-gateway.js",
     "clean": "rm -rf dist",
     "lint": "eslint src bin",
     "lint:fix": "eslint src bin --fix",

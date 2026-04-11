@@ -2,7 +2,7 @@
 
 Run MCP servers once, share them across all Claude Code sessions.
 
-Claude Code launches stdio MCP servers per session by default. mcp-compose converts them to persistent HTTP endpoints using [supergateway](https://github.com/supercorp-ai/supergateway) and manages them with [pm2](https://github.com/Unitech/pm2), so multiple sessions can connect to the same running servers.
+Claude Code launches stdio MCP servers per session by default. mcp-compose converts them to persistent HTTP endpoints using a built-in gateway and manages them with [pm2](https://github.com/Unitech/pm2), so multiple sessions can connect to the same running servers.
 
 Servers run directly on your system without containerization, preserving full access to local dependencies that some MCP servers require.
 
@@ -60,15 +60,15 @@ Create `mcp-compose.json` (or `mcp-compose.jsonc`) in:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `portBase` | number | `19100` | Starting port for stdio servers. Ports are allocated sequentially. |
+| `portBase` | number | `19100` | Starting port for managed servers. Ports are allocated sequentially. |
 | `claudeConfigPath` | string | `~/.mcp.json` | Path to Claude Code's MCP config file. Supports `~` for home directory. |
-| `logLevel` | string | `"info"` | Default log level for supergateway. Options: `"debug"`, `"info"`, `"none"` |
+| `logLevel` | string | `"info"` | Default log level for gateway processes. Options: `"debug"`, `"info"`, `"none"` |
 
 ### Server Types
 
 #### stdio - Local Command Server
 
-Runs a local command and wraps it with supergateway to expose as HTTP.
+Runs a local command and exposes it as an HTTP endpoint via the built-in gateway.
 
 ```json
 {
@@ -124,7 +124,7 @@ Passthrough to remote MCP servers. No local process is started by default.
 
 #### Remote Server with OAuth Proxy
 
-Remote servers with `"proxy": true` are wrapped with [mcp-remote](https://github.com/geelen/mcp-remote) to handle OAuth token lifecycle automatically. This solves the common issue where OAuth tokens expire and break MCP connections between sessions.
+Remote servers with `"proxy": true` are proxied through a local gateway process that handles the full OAuth 2.0 lifecycle automatically. This solves the common issue where OAuth tokens expire and break MCP connections between sessions.
 
 ```json
 {
@@ -137,10 +137,10 @@ Remote servers with `"proxy": true` are wrapped with [mcp-remote](https://github
 ```
 
 When proxy is enabled:
-- A local process is started (managed by pm2, just like stdio servers)
-- [mcp-remote](https://github.com/geelen/mcp-remote) handles the full OAuth 2.0 flow (PKCE, browser-based consent, automatic token refresh)
-- Tokens are cached at `~/.mcp-auth/` and refreshed automatically when they expire
-- The first run opens a browser for OAuth consent; subsequent runs reuse cached tokens
+- A local gateway process is started (managed by pm2, just like stdio servers)
+- The gateway handles OAuth 2.0 (PKCE, browser-based consent, automatic token refresh)
+- Tokens are cached at `~/.mcp-auth/mcp-compose/` and refreshed automatically when they expire
+- The first connection opens a browser for OAuth consent; subsequent connections reuse cached tokens
 
 You can also pass custom headers for API key authentication:
 
@@ -159,7 +159,7 @@ You can also pass custom headers for API key authentication:
 
 ### Resource Limits
 
-Control pm2 process management behavior for stdio servers.
+Control pm2 process management behavior for managed servers.
 
 ```json
 {
@@ -278,16 +278,18 @@ mcp-compose logs -f
 
 ## How It Works
 
-1. **stdio servers**: Started via pm2 using `supergateway` to expose Streamable HTTP endpoints
-2. **Remote servers**: Registered directly (no local process)
-3. **Remote servers with proxy**: Wrapped with `mcp-remote` + `supergateway` for OAuth token lifecycle management
+1. **stdio servers**: Wrapped by a built-in gateway that bridges stdio to [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http), managed by pm2
+2. **Remote servers**: Registered directly in Claude Code config (no local process)
+3. **Remote servers with proxy**: Proxied through a local gateway with built-in OAuth 2.0 lifecycle management (PKCE, token refresh)
 4. **Config sync**: Auto-updates `~/.mcp.json` for Claude Code integration
 5. **Port allocation**: Automatically detects port conflicts and uses next available port
 
-Each stdio server gets an internal port starting from `portBase` (default 19100). If a port is in use, the next available port is automatically selected.
+Each managed server gets an internal port starting from `portBase` (default 19100). If a port is in use, the next available port is automatically selected.
 
 ## Features
 
+- **Zero external dependencies for transport**: Built-in MCP gateway replaces supergateway and mcp-remote
+- **Built-in OAuth 2.0**: PKCE authorization, token refresh, and persistent token storage for remote servers
 - **Incremental updates**: Only restarts servers with changed configurations
 - **Automatic port conflict detection**: Skips ports in use and allocates next available
 - **Config validation**: Validates configuration structure with helpful error messages

@@ -14,7 +14,7 @@ function generateClaudeConfig(
   const claudeConfig: Record<string, ClaudeServerConfig> = {};
 
   for (const [name, server] of Object.entries(mcpServers)) {
-    if (server.type === 'stdio') {
+    if (server.type === 'stdio' || server.type === 'proxy') {
       claudeConfig[name] = {
         type: 'http',
         url: `http://localhost:${String(server.internalPort)}/mcp`,

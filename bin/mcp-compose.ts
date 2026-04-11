@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import {
   loadConfig,
-  getStdioServers,
+  getManagedServers,
   getServerNames,
 } from '../src/config.js';
 import pkg from '../package.json' with { type: 'json' };
@@ -77,15 +77,15 @@ program
     try {
       const config = loadConfig(getConfigPath(cmd));
       const { processPrefix, portBase } = config.settings;
-      const stdioServers = getStdioServers(config);
+      const managedServers = getManagedServers(config);
       const filteredServers =
         servers.length > 0
-          ? stdioServers.filter((s) => servers.includes(s.name))
-          : stdioServers;
+          ? managedServers.filter((s) => servers.includes(s.name))
+          : managedServers;
 
       if (filteredServers.length === 0 && servers.length > 0) {
         console.log(
-          'No stdio servers match the filter. Remote servers are synced directly.'
+          'No managed servers match the filter. Remote servers are synced directly.'
         );
       }
 
@@ -95,7 +95,7 @@ program
         // Update config with actual running ports before syncing
         for (const result of results) {
           const server = config.mcpServers[result.name];
-          if (server?.type === 'stdio') {
+          if (server?.type === 'stdio' || server?.type === 'proxy') {
             server.internalPort = result.port;
           }
         }
@@ -161,9 +161,9 @@ program
     try {
       const config = loadConfig(getConfigPath(cmd));
       const { processPrefix } = config.settings;
-      const stdioServers = getStdioServers(config);
+      const allManagedServers = getManagedServers(config);
       const serverNames =
-        servers.length > 0 ? servers : stdioServers.map((s) => s.name);
+        servers.length > 0 ? servers : allManagedServers.map((s) => s.name);
 
       console.log(`Restarting ${String(serverNames.length)} server(s)...`);
       await restartServers(serverNames, processPrefix);

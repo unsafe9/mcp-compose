@@ -2,9 +2,9 @@ import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
 import { basename } from 'path';
 import { spawn, execSync } from 'child_process';
-import { buildSupergatewayCmdForServer, resolveSupergatewayBin, resolveMcpRemoteBin } from './supergateway.js';
+import { buildGatewayCmdForServer } from './command.js';
 import { isPortAvailable } from './config.js';
-import type { NamedStdioServer, StartResult, ServerStatus } from './types.js';
+import type { NamedManagedServer, StartResult, ServerStatus } from './types.js';
 
 export type ProgressCallback = (event: ProgressEvent) => void;
 
@@ -246,26 +246,17 @@ function killSurvivorPids(pids: number[]): void {
 }
 
 export function startServers(
-  servers: NamedStdioServer[],
+  servers: NamedManagedServer[],
   prefix: string,
   portBase: number,
   onProgress?: ProgressCallback
 ): Promise<StartResult[]> {
   return withPm2(async () => {
     const total = servers.length;
-    const supergatewayBin = resolveSupergatewayBin();
-
-    // Resolve mcp-remote binary if any server uses it (proxy mode for remote servers)
-    const needsMcpRemote = servers.some((s) => s.command === 'mcp-remote');
-    const mcpRemoteBin = needsMcpRemote ? resolveMcpRemoteBin() : undefined;
-
-    function resolveCommand(command: string): string {
-      return mcpRemoteBin && command === 'mcp-remote' ? mcpRemoteBin : command;
-    }
 
     // Phase 1: Check which servers are up-to-date vs need (re)starting
     interface ServerState {
-      server: NamedStdioServer;
+      server: NamedManagedServer;
       existingProcess: ProcessDescription | null;
       upToDate: boolean;
       port: number;
@@ -274,7 +265,7 @@ export function startServers(
     const serverStates: ServerState[] = [];
 
     for (const serverEntry of servers) {
-      const { name, resourceLimits, ...server } = serverEntry;
+      const { name, ...serverConfig } = serverEntry;
       const processName = getProcessName(name, prefix);
       const existingProcess = await getRunningProcess(processName);
 
@@ -283,14 +274,13 @@ export function startServers(
 
         if (existingPort !== null) {
           // Compare config using the existing port (not the newly suggested one)
-          const cmdForComparison = buildSupergatewayCmdForServer({
-            ...server,
-            command: resolveCommand(server.command),
+          const cmdForComparison = buildGatewayCmdForServer({
+            ...serverConfig,
             internalPort: existingPort,
-            resourceLimits,
-          }, supergatewayBin);
+          });
+          const serverEnv = serverConfig.type === 'stdio' ? serverConfig.env : {};
           const envWithMarker = {
-            ...server.env,
+            ...serverEnv,
             [MCP_COMPOSE_MARKER]: name,
           };
 
@@ -351,7 +341,7 @@ export function startServers(
 
     for (const state of serverStates) {
       current++;
-      const { name, resourceLimits, ...server } = state.server;
+      const { name, ...serverConfig } = state.server;
       const processName = getProcessName(name, prefix);
 
       if (state.upToDate) {
@@ -380,15 +370,14 @@ export function startServers(
       await pm2Delete(processName);
       killSurvivorPids(descendantPids);
 
-      const cmd = buildSupergatewayCmdForServer({
-        ...server,
-        command: resolveCommand(server.command),
+      const cmd = buildGatewayCmdForServer({
+        ...serverConfig,
         internalPort: state.port,
-        resourceLimits,
-      }, supergatewayBin);
+      });
 
+      const serverEnv = serverConfig.type === 'stdio' ? serverConfig.env : {};
       const envWithMarker = {
-        ...server.env,
+        ...serverEnv,
         [MCP_COMPOSE_MARKER]: name,
       };
 
@@ -399,12 +388,12 @@ export function startServers(
         interpreter: 'none',
         env: envWithMarker,
         autorestart: true,
-        max_restarts: resourceLimits.maxRestarts ?? 10,
-        restart_delay: resourceLimits.restartDelay ?? 1000,
+        max_restarts: serverConfig.resourceLimits.maxRestarts ?? 10,
+        restart_delay: serverConfig.resourceLimits.restartDelay ?? 1000,
       };
 
-      if (resourceLimits.maxMemory !== undefined) {
-        const maxMemory = parseMemoryLimit(resourceLimits.maxMemory);
+      if (serverConfig.resourceLimits.maxMemory !== undefined) {
+        const maxMemory = parseMemoryLimit(serverConfig.resourceLimits.maxMemory);
         if (maxMemory) {
           startOptions.max_memory_restart = maxMemory;
         }
