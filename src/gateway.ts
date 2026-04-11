@@ -184,6 +184,50 @@ function createStdioBackend(
 
 // --- Proxy Backend ---
 
+/**
+ * Parse an SSE response from a remote MCP server.
+ * Returns the JSON-RPC response matching the request, and forwards
+ * any other messages (notifications) to the backend's onServerMessage.
+ */
+async function parseSseResponse(
+  res: Response,
+  originalMsg: JsonRpcMessage,
+  backend: Backend,
+): Promise<JsonRpcMessage | undefined> {
+  const text = await res.text();
+  const requestId = hasRequestId(originalMsg) ? originalMsg.id : null;
+  let response: JsonRpcMessage | undefined;
+
+  for (const block of text.split(/\n\n+/)) {
+    let data: string | undefined;
+    for (const line of block.split('\n')) {
+      if (line.startsWith('data: ')) {
+        data = line.slice(6);
+      } else if (line.startsWith('data:')) {
+        data = line.slice(5);
+      }
+    }
+    if (!data?.trim()) continue;
+
+    try {
+      const parsed: unknown = JSON.parse(data);
+      if (!isJsonRpcMessage(parsed)) continue;
+
+      // Match response to our request by ID
+      if (requestId !== null && hasRequestId(parsed) && parsed.id === requestId) {
+        response = parsed;
+      } else {
+        // Notification or other server-initiated message
+        backend.onServerMessage?.(parsed);
+      }
+    } catch {
+      // skip non-JSON data lines
+    }
+  }
+
+  return response;
+}
+
 function createProxyBackend(
   remoteUrl: string,
   headers: Record<string, string>,
@@ -235,6 +279,13 @@ function createProxyBackend(
         id: hasRequestId(msg) ? msg.id : null,
         error: { code: -32000, message: `Remote server error: ${String(res.status)}` },
       };
+    }
+
+    const contentType = res.headers.get('content-type') ?? '';
+
+    // SSE response: parse events and extract JSON-RPC messages
+    if (contentType.includes('text/event-stream')) {
+      return await parseSseResponse(res, msg, backend);
     }
 
     return await res.json() as JsonRpcMessage;
