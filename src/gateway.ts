@@ -254,7 +254,7 @@ function createProxyBackend(
     if (accessToken) {
       reqHeaders['Authorization'] = `Bearer ${accessToken}`;
     }
-    if (remoteSessionId) {
+    if (remoteSessionId && msg.method !== 'initialize') {
       reqHeaders['Mcp-Session-Id'] = remoteSessionId;
     }
 
