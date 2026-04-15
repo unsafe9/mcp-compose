@@ -57,15 +57,16 @@ interface Backend {
 
 interface Session {
   id: string;
-  backend: Backend;
-  sseResponses: Set<ServerResponse>;
   notificationBuffer: JsonRpcMessage[];
+  lastActivity: number;
 }
 
 // --- Helpers ---
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_NOTIFICATION_BUFFER = 1000;
+const SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const SESSION_REAP_INTERVAL_MS = 60 * 1000; // check every minute
 
 function isJsonRpcMessage(value: unknown): value is JsonRpcMessage {
   return typeof value === 'object' && value !== null && 'jsonrpc' in value;
@@ -84,8 +85,10 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+let sseEventId = 0;
+
 function sendSSE(res: ServerResponse, msg: JsonRpcMessage): void {
-  res.write(`event: message\nid: ${randomUUID()}\ndata: ${JSON.stringify(msg)}\n\n`);
+  res.write(`event: message\nid: ${String(++sseEventId)}\ndata: ${JSON.stringify(msg)}\n\n`);
 }
 
 function makeErrorResponse(id: number | string | null, code: number, message: string): string {
@@ -98,7 +101,7 @@ function createStdioBackend(
   command: string,
   logger: (level: LogLevel, msg: string) => void,
 ): Backend {
-  const child: ChildProcess = spawn(command, { stdio: ['pipe', 'pipe', 'pipe'], shell: true });
+  const child: ChildProcess = spawn(command, { stdio: ['pipe', 'pipe', 'pipe'], shell: true, detached: true });
   // stdio: ['pipe','pipe','pipe'] guarantees non-null streams
   if (!child.stdout || !child.stderr || !child.stdin) {
     throw new Error('Failed to create stdio pipes');
@@ -131,7 +134,12 @@ function createStdioBackend(
     close() {
       for (const [, pending] of pendingRequests) { clearTimeout(pending.timer); }
       pendingRequests.clear();
-      child.kill('SIGTERM');
+      // Kill the entire process group (shell + actual MCP server process)
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+      } catch {
+        try { child.kill('SIGTERM'); } catch { /* already dead */ }
+      }
     },
   };
 
@@ -330,62 +338,89 @@ export function createGateway(options: GatewayOptions): Gateway {
     process.stderr.write(`[${new Date().toISOString()}] [${level}] ${msg}\n`);
   }
 
-  // For proxy mode, share a single OAuthClient across all sessions
   const sharedOAuthClient = options.mode === 'proxy'
     ? new OAuthClient({ serverUrl: options.url, headers: options.headers ?? {} })
     : undefined;
 
-  function createBackend(): Backend {
+  // Single shared backend per gateway — started eagerly, recreated if it dies.
+  let nextRequestId = 1;
+  let restartBackoff = 1000;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function startBackend(): Backend {
+    let b: Backend;
     if (options.mode === 'stdio') {
-      return createStdioBackend(options.command, logger);
+      b = createStdioBackend(options.command, logger);
+    } else {
+      if (!sharedOAuthClient) {
+        throw new Error('OAuthClient not initialized for proxy mode');
+      }
+      b = createProxyBackend(
+        options.url,
+        options.headers ?? {},
+        sharedOAuthClient,
+        logger,
+      );
     }
-    if (!sharedOAuthClient) {
-      throw new Error('OAuthClient not initialized for proxy mode');
-    }
-    return createProxyBackend(
-      options.url,
-      options.headers ?? {},
-      sharedOAuthClient,
-      logger,
-    );
-  }
 
-  function createSession(): Session {
-    const id = randomUUID();
-    const backend = createBackend();
-
-    const session: Session = {
-      id,
-      backend,
-      sseResponses: new Set(),
-      notificationBuffer: [],
-    };
-
-    backend.onServerMessage = (msg): void => {
-      if (session.sseResponses.size > 0) {
-        for (const sseRes of session.sseResponses) { sendSSE(sseRes, msg); }
-      } else if (session.notificationBuffer.length < MAX_NOTIFICATION_BUFFER) {
-        session.notificationBuffer.push(msg);
+    b.onServerMessage = (msg): void => {
+      for (const session of sessions.values()) {
+        if (session.notificationBuffer.length < MAX_NOTIFICATION_BUFFER) {
+          session.notificationBuffer.push(msg);
+        }
       }
     };
 
-    backend.onClose = (): void => {
-      for (const sseRes of session.sseResponses) { sseRes.end(); }
-      session.sseResponses.clear();
-      sessions.delete(id);
+    b.onClose = (): void => {
+      logger('info', `Backend died, restarting in ${String(restartBackoff)}ms`);
+      sessions.clear();
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
+        backend = startBackend();
+        restartBackoff = Math.min(restartBackoff * 2, 30_000);
+      }, restartBackoff);
     };
 
-    sessions.set(id, session);
-    logger('info', `Session ${id.slice(0, 8)} created`);
-    return session;
+    return b;
   }
 
-  function destroySession(session: Session): void {
-    session.backend.close();
-    for (const sseRes of session.sseResponses) { sseRes.end(); }
-    session.sseResponses.clear();
-    sessions.delete(session.id);
-    logger('info', `Session ${session.id.slice(0, 8)} destroyed`);
+  let backend: Backend = startBackend();
+
+  async function sendRequest(msg: JsonRpcMessage & { id: number | string }): Promise<JsonRpcMessage> {
+    const originalId = msg.id;
+    const internalId = nextRequestId++;
+    const response = await backend.sendRequest({ ...msg, id: internalId });
+    restartBackoff = 1000;
+    return { ...response, id: originalId };
+  }
+
+  function sendNotification(msg: JsonRpcMessage): void {
+    backend.sendNotification(msg);
+  }
+
+  function respondWithResult(
+    req: IncomingMessage,
+    res: ServerResponse,
+    response: JsonRpcMessage,
+    session: Session,
+  ): void {
+    const pending = session.notificationBuffer;
+    session.notificationBuffer = [];
+    const clientAcceptsSSE = (req.headers.accept ?? '').includes('text/event-stream');
+
+    if (clientAcceptsSSE && pending.length > 0) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Mcp-Session-Id': session.id,
+      });
+      for (const notif of pending) { sendSSE(res, notif); }
+      sendSSE(res, response);
+      res.end();
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
+      res.end(JSON.stringify(response));
+    }
   }
 
   // --- HTTP handlers ---
@@ -408,13 +443,20 @@ export function createGateway(options: GatewayOptions): Gateway {
     }
 
     if (message.method === 'initialize') {
-      const session = createSession();
+      const session: Session = {
+        id: randomUUID(),
+        notificationBuffer: [],
+        lastActivity: Date.now(),
+      };
+      sessions.set(session.id, session);
+      logger('info', `Session ${session.id.slice(0, 8)} created (${String(sessions.size)} active)`);
+
       if (hasRequestId(message)) {
-        const response = await session.backend.sendRequest(message);
+        const response = await sendRequest(message);
         res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
         res.end(JSON.stringify(response));
       } else {
-        session.backend.sendNotification(message);
+        sendNotification(message);
         res.writeHead(202, { 'Mcp-Session-Id': session.id });
         res.end();
       }
@@ -435,44 +477,17 @@ export function createGateway(options: GatewayOptions): Gateway {
       return;
     }
 
+    session.lastActivity = Date.now();
+
     if (hasRequestId(message) && message.method !== undefined) {
-      const response = await session.backend.sendRequest(message);
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': sessionId });
-      res.end(JSON.stringify(response));
+      const response = await sendRequest(message);
+      respondWithResult(req, res, response, session);
       return;
     }
 
-    session.backend.sendNotification(message);
+    sendNotification(message);
     res.writeHead(202);
     res.end();
-  }
-
-  function handleGet(req: IncomingMessage, res: ServerResponse): void {
-    const sessionId = req.headers['mcp-session-id'];
-    if (typeof sessionId !== 'string') {
-      res.writeHead(400, { 'Content-Type': 'text/plain' });
-      res.end('Missing Mcp-Session-Id header');
-      return;
-    }
-
-    const session = sessions.get(sessionId);
-    if (!session) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Session not found');
-      return;
-    }
-
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-
-    session.sseResponses.add(res);
-    for (const msg of session.notificationBuffer) { sendSSE(res, msg); }
-    session.notificationBuffer = [];
-    req.on('close', () => { session.sseResponses.delete(res); });
   }
 
   function handleDelete(req: IncomingMessage, res: ServerResponse): void {
@@ -483,14 +498,13 @@ export function createGateway(options: GatewayOptions): Gateway {
       return;
     }
 
-    const session = sessions.get(sessionId);
-    if (!session) {
+    if (!sessions.delete(sessionId)) {
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Session not found');
       return;
     }
 
-    destroySession(session);
+    logger('info', `Session ${sessionId.slice(0, 8)} destroyed (${String(sessions.size)} active)`);
     res.writeHead(200);
     res.end();
   }
@@ -499,8 +513,8 @@ export function createGateway(options: GatewayOptions): Gateway {
 
   const httpServer = createHttpServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version');
     res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
 
     if (req.method === 'OPTIONS') {
@@ -526,7 +540,6 @@ export function createGateway(options: GatewayOptions): Gateway {
     const dispatch = async (): Promise<void> => {
       switch (req.method) {
         case 'POST': await handlePost(req, res); break;
-        case 'GET': handleGet(req, res); break;
         case 'DELETE': handleDelete(req, res); break;
         default:
           res.writeHead(405, { 'Content-Type': 'text/plain' });
@@ -544,6 +557,17 @@ export function createGateway(options: GatewayOptions): Gateway {
     });
   });
 
+  // Periodically reap idle sessions (safety net for clients that disconnect without DELETE)
+  const reapInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [id, session] of sessions) {
+      if (now - session.lastActivity > SESSION_IDLE_TIMEOUT_MS) {
+        logger('info', `Session ${id.slice(0, 8)} idle timeout`);
+        sessions.delete(id);
+      }
+    }
+  }, SESSION_REAP_INTERVAL_MS);
+
   return {
     start(): Promise<void> {
       return new Promise((resolve, reject) => {
@@ -557,7 +581,11 @@ export function createGateway(options: GatewayOptions): Gateway {
     },
     stop(): Promise<void> {
       return new Promise((resolve) => {
-        for (const session of sessions.values()) { destroySession(session); }
+        clearInterval(reapInterval);
+        if (restartTimer) clearTimeout(restartTimer);
+        sessions.clear();
+        backend.onClose = null;
+        backend.close();
         httpServer.close(() => { resolve(); });
       });
     },

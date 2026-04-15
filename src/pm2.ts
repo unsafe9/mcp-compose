@@ -494,7 +494,9 @@ export function stopOrphanedServers(
           type: 'stopping',
           server: serverName,
         });
+        const descendantPids = collectDescendantPids(proc);
         await pm2Delete(proc.name);
+        killSurvivorPids(descendantPids);
         onProgress?.({
           type: 'stopped',
           server: serverName,
