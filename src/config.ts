@@ -103,45 +103,6 @@ export function isPortAvailable(port: number): Promise<boolean> {
   });
 }
 
-/**
- * Find the next available port starting from the given port
- */
-async function findAvailablePort(startPort: number, maxAttempts = 100): Promise<number> {
-  for (let i = 0; i < maxAttempts; i++) {
-    const port = startPort + i;
-    if (port > 65535) {
-      throw new Error('No available ports found (exceeded port 65535)');
-    }
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available ports found after ${String(maxAttempts)} attempts starting from ${String(startPort)}`);
-}
-
-/**
- * Allocate available ports for servers, skipping ports that are in use
- */
-export async function allocatePorts(
-  serverCount: number,
-  portBase: number,
-  onPortSkipped?: (port: number, assignedPort: number) => void
-): Promise<number[]> {
-  const ports: number[] = [];
-  let nextPort = portBase;
-
-  for (let i = 0; i < serverCount; i++) {
-    const availablePort = await findAvailablePort(nextPort);
-    if (availablePort !== nextPort && onPortSkipped) {
-      onPortSkipped(nextPort, availablePort);
-    }
-    ports.push(availablePort);
-    nextPort = availablePort + 1;
-  }
-
-  return ports;
-}
-
 export function normalizeConfig(config: RawConfig): NormalizedConfig {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...config.settings };
   settings.claudeConfigPath = expandPath(settings.claudeConfigPath);

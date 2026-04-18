@@ -10,6 +10,31 @@ function getArg(name: string): string | undefined {
   return process.argv[idx + 1];
 }
 
+function parseHeaders(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`Invalid --headers JSON: ${msg}\n`);
+    process.exit(1);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    process.stderr.write('--headers must be a JSON object of string values\n');
+    process.exit(1);
+  }
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v !== 'string') {
+      process.stderr.write(`--headers value for "${k}" must be a string\n`);
+      process.exit(1);
+    }
+    result[k] = v;
+  }
+  return result;
+}
+
 const port = parseInt(getArg('port') ?? '19100', 10);
 const logLevel = (getArg('log-level') ?? 'info') as LogLevel;
 
@@ -23,8 +48,7 @@ if (command) {
   options = { mode: 'stdio', port, command, logLevel };
 } else if (url) {
   const transport = (getArg('transport') ?? 'http') as 'http' | 'sse';
-  const headersStr = getArg('headers');
-  const headers = headersStr ? JSON.parse(headersStr) as Record<string, string> : {};
+  const headers = parseHeaders(getArg('headers'));
   options = { mode: 'proxy', port, url, transport, headers, logLevel };
 } else {
   process.stderr.write(
