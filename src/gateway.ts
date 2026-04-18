@@ -58,15 +58,12 @@ interface Backend {
 interface Session {
   id: string;
   notificationBuffer: JsonRpcMessage[];
-  lastActivity: number;
 }
 
 // --- Helpers ---
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_NOTIFICATION_BUFFER = 1000;
-const SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-const SESSION_REAP_INTERVAL_MS = 60 * 1000; // check every minute
 
 function isJsonRpcMessage(value: unknown): value is JsonRpcMessage {
   return typeof value === 'object' && value !== null && 'jsonrpc' in value;
@@ -446,7 +443,6 @@ export function createGateway(options: GatewayOptions): Gateway {
       const session: Session = {
         id: randomUUID(),
         notificationBuffer: [],
-        lastActivity: Date.now(),
       };
       sessions.set(session.id, session);
       logger('info', `Session ${session.id.slice(0, 8)} created (${String(sessions.size)} active)`);
@@ -476,8 +472,6 @@ export function createGateway(options: GatewayOptions): Gateway {
       res.end(makeErrorResponse(message.id ?? null, -32000, 'Session not found or expired'));
       return;
     }
-
-    session.lastActivity = Date.now();
 
     if (hasRequestId(message) && message.method !== undefined) {
       const response = await sendRequest(message);
@@ -557,17 +551,6 @@ export function createGateway(options: GatewayOptions): Gateway {
     });
   });
 
-  // Periodically reap idle sessions (safety net for clients that disconnect without DELETE)
-  const reapInterval = setInterval(() => {
-    const now = Date.now();
-    for (const [id, session] of sessions) {
-      if (now - session.lastActivity > SESSION_IDLE_TIMEOUT_MS) {
-        logger('info', `Session ${id.slice(0, 8)} idle timeout`);
-        sessions.delete(id);
-      }
-    }
-  }, SESSION_REAP_INTERVAL_MS);
-
   return {
     start(): Promise<void> {
       return new Promise((resolve, reject) => {
@@ -581,7 +564,6 @@ export function createGateway(options: GatewayOptions): Gateway {
     },
     stop(): Promise<void> {
       return new Promise((resolve) => {
-        clearInterval(reapInterval);
         if (restartTimer) clearTimeout(restartTimer);
         sessions.clear();
         backend.onClose = null;
