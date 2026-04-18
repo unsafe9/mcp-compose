@@ -64,6 +64,7 @@ interface Session {
 
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_NOTIFICATION_BUFFER = 1000;
+const MAX_STDOUT_LINE_LENGTH = 10 * 1024 * 1024; // 10 MB
 
 function isJsonRpcMessage(value: unknown): value is JsonRpcMessage {
   return typeof value === 'object' && value !== null && 'jsonrpc' in value;
@@ -125,7 +126,12 @@ function createStdioBackend(
     },
 
     sendNotification(msg) {
-      childStdin.write(JSON.stringify(msg) + '\n');
+      try {
+        childStdin.write(JSON.stringify(msg) + '\n');
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger('debug', `Notification write failed: ${errMsg}`);
+      }
     },
 
     close() {
@@ -142,6 +148,11 @@ function createStdioBackend(
 
   childStdout.on('data', (chunk: Buffer) => {
     stdoutBuffer += chunk.toString('utf8');
+    if (stdoutBuffer.length > MAX_STDOUT_LINE_LENGTH) {
+      logger('info', `stdout line exceeded ${String(MAX_STDOUT_LINE_LENGTH)} bytes without newline; dropping buffer`);
+      stdoutBuffer = '';
+      return;
+    }
     const lines = stdoutBuffer.split(/\r?\n/);
     stdoutBuffer = lines.pop() ?? '';
     for (const line of lines) {
@@ -261,11 +272,22 @@ function createProxyBackend(
       reqHeaders['Mcp-Session-Id'] = remoteSessionId;
     }
 
-    const res = await fetch(remoteUrl, {
-      method: 'POST',
-      headers: reqHeaders,
-      body: JSON.stringify(msg),
-    });
+    let res: Response;
+    try {
+      res = await fetch(remoteUrl, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(msg),
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger('info', `Remote fetch failed: ${errMsg}`);
+      return {
+        jsonrpc: '2.0',
+        id: hasRequestId(msg) ? msg.id : null,
+        error: { code: -32000, message: `Remote server unreachable: ${errMsg}` },
+      };
+    }
 
     if (res.status === 401 && retryCount < 2) {
       const wwwAuth = res.headers.get('www-authenticate') ?? undefined;
@@ -312,7 +334,10 @@ function createProxyBackend(
     },
 
     sendNotification(msg) {
-      void forwardToRemote(msg);
+      forwardToRemote(msg).catch((err: unknown) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger('debug', `Notification forward failed: ${errMsg}`);
+      });
     },
 
     close() {
@@ -453,14 +478,19 @@ export function createGateway(options: GatewayOptions): Gateway {
       sessions.set(session.id, session);
       logger('info', `Session ${session.id.slice(0, 8)} created (${String(sessions.size)} active)`);
 
-      if (hasRequestId(message)) {
-        const response = await sendRequest(message);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
-        res.end(JSON.stringify(response));
-      } else {
-        sendNotification(message);
-        res.writeHead(202, { 'Mcp-Session-Id': session.id });
-        res.end();
+      try {
+        if (hasRequestId(message)) {
+          const response = await sendRequest(message);
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
+          res.end(JSON.stringify(response));
+        } else {
+          sendNotification(message);
+          res.writeHead(202, { 'Mcp-Session-Id': session.id });
+          res.end();
+        }
+      } catch (err) {
+        sessions.delete(session.id);
+        throw err;
       }
       return;
     }
