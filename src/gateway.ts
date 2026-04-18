@@ -58,6 +58,9 @@ interface Backend {
 interface Session {
   id: string;
   notificationBuffer: JsonRpcMessage[];
+  /** Open SSE response handling an in-flight request. Notifications during the
+   * request flow here instead of the buffer so the client sees them in real time. */
+  liveSSE: ServerResponse | null;
 }
 
 // --- Helpers ---
@@ -65,6 +68,7 @@ interface Session {
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_NOTIFICATION_BUFFER = 1000;
 const MAX_STDOUT_LINE_LENGTH = 10 * 1024 * 1024; // 10 MB
+const MAX_SSE_BUFFER = 10 * 1024 * 1024; // 10 MB
 
 function isJsonRpcMessage(value: unknown): value is JsonRpcMessage {
   return typeof value === 'object' && value !== null && 'jsonrpc' in value;
@@ -85,8 +89,9 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 let sseEventId = 0;
 
-function sendSSE(res: ServerResponse, msg: JsonRpcMessage): void {
-  res.write(`event: message\nid: ${String(++sseEventId)}\ndata: ${JSON.stringify(msg)}\n\n`);
+function sendSSE(res: ServerResponse, msg: JsonRpcMessage): boolean {
+  if (res.writableEnded || res.destroyed) return false;
+  return res.write(`event: message\nid: ${String(++sseEventId)}\ndata: ${JSON.stringify(msg)}\n\n`);
 }
 
 function makeErrorResponse(id: number | string | null, code: number, message: string): string {
@@ -201,44 +206,73 @@ function createStdioBackend(
 // --- Proxy Backend ---
 
 /**
- * Parse an SSE response from a remote MCP server.
- * Returns the JSON-RPC response matching the request, and forwards
- * any other messages (notifications) to the backend's onServerMessage.
+ * Stream-parse an SSE response from a remote MCP server, forwarding each
+ * event as soon as it arrives. Notifications are handed to onServerMessage
+ * in real time so in-flight clients see progress without waiting for the
+ * entire response. Returns the JSON-RPC response matching originalMsg.
  */
 async function parseSseResponse(
   res: Response,
   originalMsg: JsonRpcMessage,
   backend: Backend,
+  logger: (level: LogLevel, msg: string) => void,
 ): Promise<JsonRpcMessage | undefined> {
-  const text = await res.text();
+  const reader = res.body?.getReader() as ReadableStreamDefaultReader<Uint8Array> | undefined;
+  if (!reader) return undefined;
+
   const requestId = hasRequestId(originalMsg) ? originalMsg.id : null;
+  const decoder = new TextDecoder();
+  let buffer = '';
   let response: JsonRpcMessage | undefined;
 
-  for (const block of text.split(/\n\n+/)) {
+  const handleBlock = (block: string): void => {
     let data: string | undefined;
     for (const line of block.split('\n')) {
-      if (line.startsWith('data: ')) {
-        data = line.slice(6);
-      } else if (line.startsWith('data:')) {
-        data = line.slice(5);
-      }
+      if (line.startsWith('data: ')) data = line.slice(6);
+      else if (line.startsWith('data:')) data = line.slice(5);
     }
-    if (!data?.trim()) continue;
+    if (!data?.trim()) return;
 
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(data);
-      if (!isJsonRpcMessage(parsed)) continue;
-
-      // Match response to our request by ID
-      if (requestId !== null && hasRequestId(parsed) && parsed.id === requestId) {
-        response = parsed;
-      } else {
-        // Notification or other server-initiated message
-        backend.onServerMessage?.(parsed);
-      }
+      parsed = JSON.parse(data);
     } catch {
-      // skip non-JSON data lines
+      return;
     }
+    if (!isJsonRpcMessage(parsed)) return;
+
+    if (requestId !== null && hasRequestId(parsed) && parsed.id === requestId) {
+      response = parsed;
+    } else {
+      backend.onServerMessage?.(parsed);
+    }
+  };
+
+  try {
+    let searchFrom = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_SSE_BUFFER) {
+        logger('info', `SSE event exceeded ${String(MAX_SSE_BUFFER)} bytes without terminator; aborting`);
+        await reader.cancel().catch(() => { /* ignore */ });
+        return response;
+      }
+      let boundary = buffer.indexOf('\n\n', searchFrom);
+      while (boundary !== -1) {
+        handleBlock(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf('\n\n');
+      }
+      searchFrom = Math.max(0, buffer.length - 1);
+    }
+    if (buffer.trim()) handleBlock(buffer);
+  } catch (err) {
+    await reader.cancel().catch(() => { /* ignore */ });
+    throw err;
+  } finally {
+    reader.releaseLock();
   }
 
   return response;
@@ -318,7 +352,7 @@ function createProxyBackend(
 
     // SSE response: parse events and extract JSON-RPC messages
     if (contentType.includes('text/event-stream')) {
-      return await parseSseResponse(res, msg, backend);
+      return await parseSseResponse(res, msg, backend, logger);
     }
 
     return await res.json() as JsonRpcMessage;
@@ -393,6 +427,8 @@ export function createGateway(options: GatewayOptions): Gateway {
 
     b.onServerMessage = (msg): void => {
       for (const session of sessions.values()) {
+        if (session.liveSSE && sendSSE(session.liveSSE, msg)) continue;
+        if (session.liveSSE) session.liveSSE = null;
         if (session.notificationBuffer.length < MAX_NOTIFICATION_BUFFER) {
           session.notificationBuffer.push(msg);
         }
@@ -426,29 +462,51 @@ export function createGateway(options: GatewayOptions): Gateway {
     backend.sendNotification(msg);
   }
 
-  function respondWithResult(
-    req: IncomingMessage,
+  async function handleRequestOverSSE(
     res: ServerResponse,
-    response: JsonRpcMessage,
+    message: JsonRpcMessage & { id: number | string },
     session: Session,
-  ): void {
+  ): Promise<void> {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Mcp-Session-Id': session.id,
+    });
+
     const pending = session.notificationBuffer;
     session.notificationBuffer = [];
-    const clientAcceptsSSE = (req.headers.accept ?? '').includes('text/event-stream');
+    for (const notif of pending) sendSSE(res, notif);
 
-    if (clientAcceptsSSE && pending.length > 0) {
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Mcp-Session-Id': session.id,
-      });
-      for (const notif of pending) { sendSSE(res, notif); }
+    session.liveSSE = res;
+    const detachIfOwned = (): void => {
+      if (session.liveSSE === res) session.liveSSE = null;
+    };
+    res.on('close', detachIfOwned);
+
+    try {
+      const response = await sendRequest(message);
       sendSSE(res, response);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      sendSSE(res, {
+        jsonrpc: '2.0',
+        id: message.id,
+        error: { code: -32603, message: errMsg },
+      });
+    } finally {
+      res.removeListener('close', detachIfOwned);
+      detachIfOwned();
       res.end();
-    } else {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
-      res.end(JSON.stringify(response));
     }
+  }
+
+  function respondWithJson(
+    res: ServerResponse,
+    response: JsonRpcMessage,
+    sessionId: string,
+  ): void {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': sessionId });
+    res.end(JSON.stringify(response));
   }
 
   // --- HTTP handlers ---
@@ -474,6 +532,7 @@ export function createGateway(options: GatewayOptions): Gateway {
       const session: Session = {
         id: randomUUID(),
         notificationBuffer: [],
+        liveSSE: null,
       };
       sessions.set(session.id, session);
       logger('info', `Session ${session.id.slice(0, 8)} created (${String(sessions.size)} active)`);
@@ -481,8 +540,7 @@ export function createGateway(options: GatewayOptions): Gateway {
       try {
         if (hasRequestId(message)) {
           const response = await sendRequest(message);
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': session.id });
-          res.end(JSON.stringify(response));
+          respondWithJson(res, response, session.id);
         } else {
           sendNotification(message);
           res.writeHead(202, { 'Mcp-Session-Id': session.id });
@@ -510,8 +568,13 @@ export function createGateway(options: GatewayOptions): Gateway {
     }
 
     if (hasRequestId(message) && message.method !== undefined) {
-      const response = await sendRequest(message);
-      respondWithResult(req, res, response, session);
+      const clientAcceptsSSE = (req.headers.accept ?? '').includes('text/event-stream');
+      if (clientAcceptsSSE) {
+        await handleRequestOverSSE(res, message, session);
+      } else {
+        const response = await sendRequest(message);
+        respondWithJson(res, response, session.id);
+      }
       return;
     }
 
