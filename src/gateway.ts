@@ -242,7 +242,13 @@ function createProxyBackend(
   let remoteSessionId: string | undefined;
   let accessToken: string | undefined;
 
+  // Preload cached token so the first request avoids an unnecessary 401 roundtrip.
+  const initialTokenLoad = oauthClient.getAccessToken().then((token) => {
+    if (token && !accessToken) accessToken = token;
+  }).catch(() => { /* fall through to 401-driven flow */ });
+
   async function forwardToRemote(msg: JsonRpcMessage, retryCount = 0): Promise<JsonRpcMessage | undefined> {
+    await initialTokenLoad;
     const reqHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/event-stream',
