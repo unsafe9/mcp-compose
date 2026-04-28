@@ -48,6 +48,7 @@ Create `mcp-compose.json` (or `mcp-compose.jsonc`) in:
   "settings": {
     "portBase": 19100,
     "claudeConfigPath": "~/.mcp.json",
+    "codexConfigPath": "~/.codex/config.toml",
     "logLevel": "info"
   },
   "mcpServers": {
@@ -62,6 +63,7 @@ Create `mcp-compose.json` (or `mcp-compose.jsonc`) in:
 |----------|------|---------|-------------|
 | `portBase` | number | `19100` | Starting port for managed servers. Ports are allocated sequentially. |
 | `claudeConfigPath` | string | `~/.mcp.json` | Path to Claude Code's MCP config file. Supports `~` for home directory. |
+| `codexConfigPath` | string | `~/.codex/config.toml` | Path to Codex CLI's config file. Codex only supports streamable HTTP, so SSE-only remotes are skipped (use `proxy: true` to bridge them). |
 | `logLevel` | string | `"info"` | Default log level for gateway processes. Options: `"debug"`, `"info"`, `"none"` |
 
 ### Server Types
@@ -281,7 +283,7 @@ mcp-compose logs -f
 1. **stdio servers**: Wrapped by a built-in gateway that bridges stdio to [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http), managed by pm2
 2. **Remote servers**: Registered directly in Claude Code config (no local process)
 3. **Remote servers with proxy**: Proxied through a local gateway with built-in OAuth 2.0 lifecycle management (PKCE, token refresh)
-4. **Config sync**: Auto-updates `~/.mcp.json` for Claude Code integration
+4. **Config sync**: Auto-updates `~/.mcp.json` for Claude Code and `~/.codex/config.toml` for Codex CLI
 5. **Port allocation**: Automatically detects port conflicts and uses next available port
 
 Each managed server gets an internal port starting from `portBase` (default 19100). If a port is in use, the next available port is automatically selected.

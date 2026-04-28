@@ -9,6 +9,7 @@ export interface ResourceLimits {
 export interface Settings {
   portBase: number;
   claudeConfigPath: string;
+  codexConfigPath: string;
   logLevel: LogLevel;
   processPrefix: string;
 }
@@ -113,6 +114,23 @@ export interface ClaudeServerConfig {
 
 export interface ClaudeConfig {
   mcpServers?: Record<string, ClaudeServerConfig>;
+  [key: string]: unknown;
+}
+
+export interface CodexStdioServer {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+export interface CodexHttpServer {
+  url: string;
+}
+
+export type CodexServerConfig = CodexStdioServer | CodexHttpServer;
+
+export interface CodexConfig {
+  mcp_servers?: Record<string, CodexServerConfig>;
   [key: string]: unknown;
 }
 

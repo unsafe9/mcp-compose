@@ -73,6 +73,12 @@ function validateSettings(
     }
   }
 
+  if ('codexConfigPath' in settings) {
+    if (typeof settings['codexConfigPath'] !== 'string') {
+      addError(errors, 'settings.codexConfigPath', 'must be a string');
+    }
+  }
+
   if ('logLevel' in settings) {
     validateLogLevel(settings['logLevel'], 'settings.logLevel', errors);
   }

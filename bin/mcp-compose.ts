@@ -19,7 +19,12 @@ import {
   streamLogs,
 } from '../src/pm2.js';
 import type { ProgressEvent } from '../src/pm2.js';
-import { syncToClaudeConfig, removeFromClaudeConfig } from '../src/sync.js';
+import {
+  syncToClaudeConfig,
+  removeFromClaudeConfig,
+  syncToCodexConfig,
+  removeFromCodexConfig,
+} from '../src/sync.js';
 
 function formatProgress(event: ProgressEvent): string {
   switch (event.type) {
@@ -112,8 +117,15 @@ program
       }
 
       console.log('');
-      const syncResult = syncToClaudeConfig(config);
-      console.log(`  ✓ Synced ${syncResult.path}`);
+      const claudeResult = syncToClaudeConfig(config);
+      console.log(`  ✓ Synced ${claudeResult.path}`);
+      const codexResult = syncToCodexConfig(config);
+      console.log(`  ✓ Synced ${codexResult.path}`);
+      if (codexResult.skipped.length > 0) {
+        console.log(
+          `  ⚠ Skipped (codex requires streamable HTTP, use proxy:true for SSE): ${codexResult.skipped.join(', ')}`
+        );
+      }
     } catch (err) {
       handleError(err);
     }
@@ -138,13 +150,20 @@ program
         console.log(`  ✓ Stopped ${String(count)} server(s)`);
       }
 
+      const filter = servers.length > 0 ? servers : null;
+
       console.log('\nRemoving from Claude Code config...');
-      const removeResult = removeFromClaudeConfig(
-        config,
-        servers.length > 0 ? servers : null
-      );
-      if (removeResult.removed.length > 0) {
-        console.log(`  ✓ Removed: ${removeResult.removed.join(', ')}`);
+      const claudeRemove = removeFromClaudeConfig(config, filter);
+      if (claudeRemove.removed.length > 0) {
+        console.log(`  ✓ Removed: ${claudeRemove.removed.join(', ')}`);
+      } else {
+        console.log('  (no changes)');
+      }
+
+      console.log('\nRemoving from Codex config...');
+      const codexRemove = removeFromCodexConfig(config, filter);
+      if (codexRemove.removed.length > 0) {
+        console.log(`  ✓ Removed: ${codexRemove.removed.join(', ')}`);
       } else {
         console.log('  (no changes)');
       }

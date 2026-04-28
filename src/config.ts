@@ -20,6 +20,7 @@ import { assertValidConfig } from './validation.js';
 const DEFAULT_SETTINGS: Settings = {
   portBase: 19100,
   claudeConfigPath: '~/.mcp.json',
+  codexConfigPath: '~/.codex/config.toml',
   logLevel: 'info',
   processPrefix: 'mcp-compose-',
 };
@@ -106,6 +107,7 @@ export function isPortAvailable(port: number): Promise<boolean> {
 export function normalizeConfig(config: RawConfig): NormalizedConfig {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...config.settings };
   settings.claudeConfigPath = expandPath(settings.claudeConfigPath);
+  settings.codexConfigPath = expandPath(settings.codexConfigPath);
 
   const mcpServers: Record<string, NormalizedServer> = {};
   let portIndex = 0;

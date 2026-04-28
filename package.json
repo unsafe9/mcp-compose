@@ -48,6 +48,7 @@
     "commander": "^12.1.0",
     "mcp-compose": "^0.0.5",
     "pm2": "^5.4.3",
+    "smol-toml": "^1.6.1",
     "string-env-interpolation": "^1.0.1",
     "strip-json-comments": "^5.0.3"
   },
