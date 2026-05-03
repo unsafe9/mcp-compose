@@ -176,6 +176,15 @@ function validateRemoteServer(
     addError(errors, `${path}.proxy`, 'must be a boolean');
   }
 
+  if ('auth' in server) {
+    const auth = server['auth'];
+    if (auth !== 'managed' && auth !== 'passthrough') {
+      addError(errors, `${path}.auth`, 'must be "managed" or "passthrough"');
+    } else if (!('proxy' in server) || server['proxy'] !== true) {
+      addError(errors, `${path}.auth`, 'requires "proxy": true');
+    }
+  }
+
   if ('headers' in server) {
     validateStringRecord(server['headers'], `${path}.headers`, errors);
   }

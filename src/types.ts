@@ -24,11 +24,14 @@ export interface RawStdioServer {
   resourceLimits?: ResourceLimits;
 }
 
+export type AuthMode = 'managed' | 'passthrough';
+
 export interface RawRemoteServer {
   type: 'sse' | 'http';
   url: string;
   disabled?: boolean;
   proxy?: boolean;
+  auth?: AuthMode;
   headers?: Record<string, string>;
   logLevel?: LogLevel;
   resourceLimits?: ResourceLimits;
@@ -61,6 +64,7 @@ export interface ProxyServer {
   type: 'proxy';
   url: string;
   transport: 'http' | 'sse';
+  authMode: AuthMode;
   headers: Record<string, string>;
   internalPort: number;
   logLevel: LogLevel;

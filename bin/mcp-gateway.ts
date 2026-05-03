@@ -2,7 +2,7 @@
 
 import { createGateway } from '../src/gateway.js';
 import type { GatewayOptions } from '../src/gateway.js';
-import type { LogLevel } from '../src/types.js';
+import type { AuthMode, LogLevel } from '../src/types.js';
 
 function getArg(name: string): string | undefined {
   const idx = process.argv.indexOf(`--${name}`);
@@ -49,12 +49,18 @@ if (command) {
 } else if (url) {
   const transport = (getArg('transport') ?? 'http') as 'http' | 'sse';
   const headers = parseHeaders(getArg('headers'));
-  options = { mode: 'proxy', port, url, transport, headers, logLevel };
+  const rawAuthMode = getArg('auth-mode') ?? 'managed';
+  if (rawAuthMode !== 'managed' && rawAuthMode !== 'passthrough') {
+    process.stderr.write(`--auth-mode must be "managed" or "passthrough", got "${rawAuthMode}"\n`);
+    process.exit(1);
+  }
+  const authMode: AuthMode = rawAuthMode;
+  options = { mode: 'proxy', port, url, transport, headers, authMode, logLevel };
 } else {
   process.stderr.write(
     'Usage:\n' +
     '  mcp-gateway --command <cmd> --port <port> [--log-level debug|info|none]\n' +
-    '  mcp-gateway --url <url> --port <port> [--transport http|sse] [--headers \'{"k":"v"}\'] [--log-level debug|info|none]\n'
+    '  mcp-gateway --url <url> --port <port> [--transport http|sse] [--headers \'{"k":"v"}\'] [--auth-mode managed|passthrough] [--log-level debug|info|none]\n'
   );
   process.exit(1);
 }

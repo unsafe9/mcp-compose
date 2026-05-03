@@ -169,10 +169,12 @@ function normalizeServer(
   // Proxy mode: gateway connects directly to remote server with OAuth lifecycle management
   if ('proxy' in server && server.proxy) {
     const headers = 'headers' in server ? server.headers : undefined;
+    const authMode = ('auth' in server ? server.auth : undefined) ?? 'managed';
     return {
       type: 'proxy',
       url: server.url,
       transport: type,
+      authMode,
       headers: headers ?? {},
       internalPort,
       logLevel: server.logLevel ?? settings.logLevel,

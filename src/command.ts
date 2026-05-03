@@ -42,6 +42,8 @@ function buildProxyGatewayCmd(server: ProxyServer): GatewayCommand {
     String(server.internalPort),
     '--transport',
     server.transport,
+    '--auth-mode',
+    server.authMode,
     '--log-level',
     server.logLevel,
   ];
