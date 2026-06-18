@@ -235,6 +235,60 @@ Add `"disabled": true` to skip a server without removing its config:
 }
 ```
 
+### Tip: 1Password CLI Secrets
+
+Use 1Password secret references when MCP servers need API keys or tokens. This lets you unlock 1Password once, start all long-running MCP servers with resolved credentials, and then run each agent session without handing credentials to the agent itself.
+
+`mcp-compose` expands environment variables in its JSON config before starting servers, so keep the 1Password paths in a local env file:
+
+```dotenv
+# mcp-compose.env
+GITHUB_PERSONAL_ACCESS_TOKEN=op://Private/github-mcp/token
+FIRECRAWL_API_KEY=op://Private/firecrawl/api-key
+```
+
+Then reference those variables from `mcp-compose.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+Start or restart the servers through `op run`:
+
+```bash
+op signin
+op run --env-file ./mcp-compose.env -- mcp-compose up
+```
+
+`op signin` only prompts when the CLI is not already authenticated. If multiple 1Password accounts are configured, choose one with `op --account <account> run ...` or set `OP_ACCOUNT`. `op run` resolves environment variables whose values are `op://vault/item/field` secret references before `mcp-compose` starts the managed servers. This keeps plaintext secrets out of the tracked config and agent config, but the managed MCP server process still receives the resolved environment variables. Secret output is masked by default.
+
+`op inject` can also resolve `{{ op://vault/item/field }}` placeholders into a temporary config file, but this is not recommended because the output file contains plaintext secrets:
+
+```bash
+op inject -i mcp-compose.1password.json -o /tmp/mcp-compose.json
+mcp-compose -c /tmp/mcp-compose.json up
+rm /tmp/mcp-compose.json
+```
+
+Prefer the `op run --env-file` flow so the tracked config contains only environment variable names and the env file contains only 1Password references.
+
 ## CLI Reference
 
 ```
