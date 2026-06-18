@@ -19,13 +19,19 @@ export function buildGatewayCmdForServer(server: StdioServer | ProxyServer): Gat
 }
 
 function buildStdioGatewayCmd(server: StdioServer): GatewayCommand {
-  const stdioCmd = buildStdioCommand(server.command, server.args);
+  const stdioArgs = server.args.map((arg) => {
+    if (arg.includes('~')) {
+      return expandPath(arg);
+    }
+    return arg;
+  });
 
   return {
     script: resolveGatewayBin(),
     args: [
       '--command',
-      stdioCmd,
+      server.command,
+      ...stdioArgs.flatMap((arg) => ['--command-arg', arg]),
       '--port',
       String(server.internalPort),
       '--log-level',
@@ -56,24 +62,4 @@ function buildProxyGatewayCmd(server: ProxyServer): GatewayCommand {
     script: resolveGatewayBin(),
     args,
   };
-}
-
-function buildStdioCommand(command: string, args: string[]): string {
-  const expandedArgs = args.map((arg) => {
-    if (arg.includes('~')) {
-      return expandPath(arg);
-    }
-    return arg;
-  });
-
-  const allParts = [command, ...expandedArgs];
-
-  return allParts
-    .map((part) => {
-      if (/[\s"'\\]/.test(part)) {
-        return `"${part.replace(/["\\]/g, '\\$&')}"`;
-      }
-      return part;
-    })
-    .join(' ');
 }

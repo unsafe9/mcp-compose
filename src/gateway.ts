@@ -1,13 +1,16 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import crossSpawn from 'cross-spawn';
 import type { AuthMode, LogLevel } from './types.js';
 import { OAuthClient } from './oauth.js';
+import { killProcessTree } from './process-tree.js';
 
 export interface StdioGatewayOptions {
   mode: 'stdio';
   port: number;
   command: string;
+  args?: string[];
   logLevel?: LogLevel;
 }
 
@@ -129,9 +132,15 @@ function buildProtectedResourceUrls(remoteUrl: string): string[] {
 
 function createStdioBackend(
   command: string,
+  args: string[],
   logger: (level: LogLevel, msg: string) => void,
 ): Backend {
-  const child: ChildProcess = spawn(command, { stdio: ['pipe', 'pipe', 'pipe'], shell: true, detached: true });
+  const child: ChildProcess = crossSpawn(command, args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+    detached: process.platform !== 'win32',
+    windowsHide: true,
+  });
   // stdio: ['pipe','pipe','pipe'] guarantees non-null streams
   if (!child.stdout || !child.stderr || !child.stdin) {
     throw new Error('Failed to create stdio pipes');
@@ -169,12 +178,7 @@ function createStdioBackend(
     close() {
       for (const [, pending] of pendingRequests) { clearTimeout(pending.timer); }
       pendingRequests.clear();
-      // Kill the entire process group (shell + actual MCP server process)
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        try { child.kill('SIGTERM'); } catch { /* already dead */ }
-      }
+      if (child.pid) killProcessTree(child.pid);
     },
   };
 
@@ -460,7 +464,7 @@ export function createGateway(options: GatewayOptions): Gateway {
   function startBackend(): Backend {
     let b: Backend;
     if (options.mode === 'stdio') {
-      b = createStdioBackend(options.command, logger);
+      b = createStdioBackend(options.command, options.args ?? [], logger);
     } else {
       b = createProxyBackend(
         options.url,

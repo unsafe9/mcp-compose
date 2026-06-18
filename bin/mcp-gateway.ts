@@ -4,10 +4,60 @@ import { createGateway } from '../src/gateway.js';
 import type { GatewayOptions } from '../src/gateway.js';
 import type { AuthMode, LogLevel } from '../src/types.js';
 
-function getArg(name: string): string | undefined {
-  const idx = process.argv.indexOf(`--${name}`);
-  if (idx === -1 || idx + 1 >= process.argv.length) return undefined;
-  return process.argv[idx + 1];
+interface CliArgs {
+  command?: string;
+  commandArgs: string[];
+  url?: string;
+  transport?: string;
+  headers?: string;
+  authMode?: string;
+  port?: string;
+  logLevel?: string;
+}
+
+function parseArgs(argv: string[]): CliArgs {
+  const parsed: CliArgs = { commandArgs: [] };
+
+  for (let i = 0; i < argv.length; i++) {
+    const name = argv[i];
+    if (!name?.startsWith('--')) continue;
+
+    const value = argv[i + 1];
+    if (value === undefined) break;
+
+    switch (name) {
+      case '--command':
+        parsed.command = value;
+        break;
+      case '--command-arg':
+        parsed.commandArgs.push(value);
+        break;
+      case '--url':
+        parsed.url = value;
+        break;
+      case '--transport':
+        parsed.transport = value;
+        break;
+      case '--headers':
+        parsed.headers = value;
+        break;
+      case '--auth-mode':
+        parsed.authMode = value;
+        break;
+      case '--port':
+        parsed.port = value;
+        break;
+      case '--log-level':
+        parsed.logLevel = value;
+        break;
+      default:
+        break;
+    }
+
+    i++;
+  }
+
+  return parsed;
 }
 
 function parseHeaders(raw: string | undefined): Record<string, string> {
@@ -35,21 +85,21 @@ function parseHeaders(raw: string | undefined): Record<string, string> {
   return result;
 }
 
-const port = parseInt(getArg('port') ?? '19100', 10);
-const logLevel = (getArg('log-level') ?? 'info') as LogLevel;
+const cliArgs = parseArgs(process.argv.slice(2));
+const port = parseInt(cliArgs.port ?? '19100', 10);
+const logLevel = (cliArgs.logLevel ?? 'info') as LogLevel;
 
 // Detect mode from arguments
-const command = getArg('command');
-const url = getArg('url');
+const { command, url } = cliArgs;
 
 let options: GatewayOptions;
 
-if (command) {
-  options = { mode: 'stdio', port, command, logLevel };
+if (command !== undefined) {
+  options = { mode: 'stdio', port, command, args: cliArgs.commandArgs, logLevel };
 } else if (url) {
-  const transport = (getArg('transport') ?? 'http') as 'http' | 'sse';
-  const headers = parseHeaders(getArg('headers'));
-  const rawAuthMode = getArg('auth-mode') ?? 'managed';
+  const transport = (cliArgs.transport ?? 'http') as 'http' | 'sse';
+  const headers = parseHeaders(cliArgs.headers);
+  const rawAuthMode = cliArgs.authMode ?? 'managed';
   if (rawAuthMode !== 'managed' && rawAuthMode !== 'passthrough') {
     process.stderr.write(`--auth-mode must be "managed" or "passthrough", got "${rawAuthMode}"\n`);
     process.exit(1);
@@ -59,7 +109,7 @@ if (command) {
 } else {
   process.stderr.write(
     'Usage:\n' +
-    '  mcp-gateway --command <cmd> --port <port> [--log-level debug|info|none]\n' +
+    '  mcp-gateway --command <cmd> [--command-arg <arg> ...] --port <port> [--log-level debug|info|none]\n' +
     '  mcp-gateway --url <url> --port <port> [--transport http|sse] [--headers \'{"k":"v"}\'] [--auth-mode managed|passthrough] [--log-level debug|info|none]\n'
   );
   process.exit(1);

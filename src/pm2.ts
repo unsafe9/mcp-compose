@@ -1,9 +1,12 @@
 import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
 import { basename } from 'path';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
+import { createRequire } from 'node:module';
 import { buildGatewayCmdForServer } from './command.js';
 import { isPortAvailable } from './config.js';
+import { extractGatewayPort } from './pm2-args.js';
+import { getDescendantPids, killPid } from './process-tree.js';
 import type { NamedManagedServer, StartResult, ServerStatus } from './types.js';
 
 export type ProgressCallback = (event: ProgressEvent) => void;
@@ -19,6 +22,7 @@ export interface ProgressEvent {
 
 // Environment variable marker to identify mcp-compose managed processes
 const MCP_COMPOSE_MARKER = '__MCP_COMPOSE__';
+const require = createRequire(import.meta.url);
 
 interface Pm2EnvWithMarker {
   [MCP_COMPOSE_MARKER]?: string;
@@ -26,6 +30,7 @@ interface Pm2EnvWithMarker {
   pm_uptime?: number;
   restart_time?: number;
   pm_exec_path?: string;
+  exec_interpreter?: string;
   args?: string[];
   env?: Record<string, string>;
 }
@@ -132,14 +137,7 @@ function extractPortFromProcess(process: ProcessDescription): number | null {
   if (!pm2Env) return null;
 
   const args = pm2Env.args ?? [];
-  const portIndex = args.indexOf('--port');
-  if (portIndex === -1 || portIndex + 1 >= args.length) return null;
-
-  const portStr = args[portIndex + 1];
-  if (portStr === undefined) return null;
-
-  const port = parseInt(portStr, 10);
-  return isNaN(port) ? null : port;
+  return extractGatewayPort(args);
 }
 
 /**
@@ -149,7 +147,8 @@ function isProcessConfigMatch(
   process: ProcessDescription,
   script: string,
   args: string[],
-  env: Record<string, string>
+  env: Record<string, string>,
+  interpreter: string
 ): boolean {
   const pm2Env = process.pm2_env as Pm2EnvWithMarker | undefined;
   if (!pm2Env) return false;
@@ -162,6 +161,8 @@ function isProcessConfigMatch(
   if (currentScript !== script && basename(currentScript) !== basename(script)) {
     return false;
   }
+
+  if (pm2Env.exec_interpreter !== interpreter) return false;
 
   // Check args (pm2 stores them as array)
   const currentArgs = pm2Env.args ?? [];
@@ -196,32 +197,6 @@ function getServerNameFromProcess(p: ProcessDescription & { name: string; pm2_en
 }
 
 /**
- * Recursively collect all descendant PIDs of a given PID.
- * Uses pgrep -P to find children at each level.
- */
-function getDescendantPids(pid: number): number[] {
-  const descendants: number[] = [];
-  try {
-    const output = execSync(`pgrep -P ${String(pid)}`, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    if (!output) return descendants;
-
-    for (const line of output.split('\n')) {
-      const childPid = parseInt(line, 10);
-      if (!isNaN(childPid)) {
-        descendants.push(childPid);
-        descendants.push(...getDescendantPids(childPid));
-      }
-    }
-  } catch {
-    // pgrep exits with 1 when no children found
-  }
-  return descendants;
-}
-
-/**
  * Collect all descendant PIDs from a pm2-managed process.
  * Must be called BEFORE pm2Delete so the process tree is still alive.
  */
@@ -237,11 +212,7 @@ function collectDescendantPids(proc: ProcessDescription | null): number[] {
  */
 function killSurvivorPids(pids: number[]): void {
   for (const pid of pids) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Process already dead
-    }
+    killPid(pid);
   }
 }
 
@@ -284,7 +255,13 @@ export function startServers(
             [MCP_COMPOSE_MARKER]: name,
           };
 
-          if (isProcessConfigMatch(existingProcess, cmdForComparison.script, cmdForComparison.args, envWithMarker)) {
+          if (isProcessConfigMatch(
+            existingProcess,
+            cmdForComparison.script,
+            cmdForComparison.args,
+            envWithMarker,
+            process.execPath,
+          )) {
             serverStates.push({
               server: serverEntry,
               existingProcess,
@@ -385,7 +362,7 @@ export function startServers(
         name: processName,
         script: cmd.script,
         args: cmd.args,
-        interpreter: 'none',
+        interpreter: process.execPath,
         env: envWithMarker,
         autorestart: true,
         max_restarts: serverConfig.resourceLimits.maxRestarts ?? 10,
@@ -538,7 +515,7 @@ export function streamLogs(
   prefix?: string,
   options?: { follow?: boolean | undefined; err?: boolean | undefined }
 ): ReturnType<typeof spawn> {
-  const args = ['pm2', 'logs'];
+  const args = [require.resolve('pm2/bin/pm2'), 'logs'];
   if (serverName && prefix) {
     args.push(getProcessName(serverName, prefix));
   }
@@ -548,5 +525,5 @@ export function streamLogs(
   if (options?.err) {
     args.push('--err');
   }
-  return spawn('npx', args, { stdio: 'inherit' });
+  return spawn(process.execPath, args, { stdio: 'inherit', windowsHide: true });
 }
