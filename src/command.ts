@@ -11,11 +11,19 @@ export function resolveGatewayBin(): string {
   return GATEWAY_BIN;
 }
 
-export function buildGatewayCmdForServer(server: StdioServer | ProxyServer): GatewayCommand {
+export interface GatewayLaunchOptions {
+  configPath?: string | undefined;
+  serverName?: string | undefined;
+}
+
+export function buildGatewayCmdForServer(
+  server: StdioServer | ProxyServer,
+  options: GatewayLaunchOptions = {}
+): GatewayCommand {
   if (server.type === 'stdio') {
     return buildStdioGatewayCmd(server);
   }
-  return buildProxyGatewayCmd(server);
+  return buildProxyGatewayCmd(server, options);
 }
 
 function buildStdioGatewayCmd(server: StdioServer): GatewayCommand {
@@ -40,7 +48,21 @@ function buildStdioGatewayCmd(server: StdioServer): GatewayCommand {
   };
 }
 
-function buildProxyGatewayCmd(server: ProxyServer): GatewayCommand {
+function buildProxyGatewayCmd(server: ProxyServer, options: GatewayLaunchOptions): GatewayCommand {
+  if (options.configPath && options.serverName) {
+    return {
+      script: resolveGatewayBin(),
+      args: [
+        '--config',
+        options.configPath,
+        '--server',
+        options.serverName,
+        '--port',
+        String(server.internalPort),
+      ],
+    };
+  }
+
   const args = [
     '--url',
     server.url,

@@ -1,5 +1,6 @@
 import pm2 from 'pm2';
 import type { ProcessDescription, StartOptions, Proc } from 'pm2';
+import { createHash } from 'crypto';
 import { basename } from 'path';
 import { spawn } from 'child_process';
 import { createRequire } from 'node:module';
@@ -7,7 +8,7 @@ import { buildGatewayCmdForServer } from './command.js';
 import { isPortAvailable } from './config.js';
 import { extractGatewayPort } from './pm2-args.js';
 import { getDescendantPids, killPid } from './process-tree.js';
-import type { NamedManagedServer, StartResult, ServerStatus } from './types.js';
+import type { GatewayCommand, NamedManagedServer, ProxyServer, StartResult, StdioServer, ServerStatus } from './types.js';
 
 export type ProgressCallback = (event: ProgressEvent) => void;
 
@@ -22,10 +23,14 @@ export interface ProgressEvent {
 
 // Environment variable marker to identify mcp-compose managed processes
 const MCP_COMPOSE_MARKER = '__MCP_COMPOSE__';
+const MCP_COMPOSE_CONFIG_HASH = '__MCP_COMPOSE_CONFIG_HASH__';
 const require = createRequire(import.meta.url);
+
+type ManagedServerConfig = StdioServer | ProxyServer;
 
 interface Pm2EnvWithMarker {
   [MCP_COMPOSE_MARKER]?: string;
+  [MCP_COMPOSE_CONFIG_HASH]?: string;
   status?: string;
   pm_uptime?: number;
   restart_time?: number;
@@ -54,6 +59,71 @@ function parseMemoryLimit(limit: string | number): number | undefined {
     case 'G': return value * 1024 * 1024 * 1024;
     default: return value;
   }
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === undefined) {
+    return 'null';
+  }
+
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entryValue]) => entryValue !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+
+  return `{${entries
+    .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableSerialize(entryValue)}`)
+    .join(',')}}`;
+}
+
+function getRuntimeConfigHashInput(server: ManagedServerConfig): Record<string, unknown> {
+  if (server.type === 'stdio') {
+    return {
+      type: server.type,
+      command: server.command,
+      args: server.args,
+      env: server.env,
+      internalPort: server.internalPort,
+      logLevel: server.logLevel,
+      resourceLimits: server.resourceLimits,
+    };
+  }
+
+  return {
+    type: server.type,
+    url: server.url,
+    transport: server.transport,
+    authMode: server.authMode,
+    headers: server.headers,
+    internalPort: server.internalPort,
+    logLevel: server.logLevel,
+    resourceLimits: server.resourceLimits,
+  };
+}
+
+function createConfigHash(server: ManagedServerConfig, command: GatewayCommand): string {
+  return `sha256:${createHash('sha256')
+    .update(stableSerialize({
+      command,
+      runtimeConfig: getRuntimeConfigHashInput(server),
+    }))
+    .digest('hex')}`;
+}
+
+function getPm2Env(serverName: string, server: ManagedServerConfig, command: GatewayCommand): Record<string, string> {
+  const serverEnv = server.type === 'stdio' ? server.env : {};
+  return {
+    ...serverEnv,
+    [MCP_COMPOSE_MARKER]: serverName,
+    [MCP_COMPOSE_CONFIG_HASH]: createConfigHash(server, command),
+  };
 }
 
 // Note: pm2's types incorrectly define callbacks as (err: Error) instead of (err: Error | null)
@@ -146,8 +216,7 @@ function extractPortFromProcess(process: ProcessDescription): number | null {
 function isProcessConfigMatch(
   process: ProcessDescription,
   script: string,
-  args: string[],
-  env: Record<string, string>,
+  configHash: string,
   interpreter: string
 ): boolean {
   const pm2Env = process.pm2_env as Pm2EnvWithMarker | undefined;
@@ -164,21 +233,7 @@ function isProcessConfigMatch(
 
   if (pm2Env.exec_interpreter !== interpreter) return false;
 
-  // Check args (pm2 stores them as array)
-  const currentArgs = pm2Env.args ?? [];
-  if (currentArgs.length !== args.length) return false;
-  for (let i = 0; i < args.length; i++) {
-    if (currentArgs[i] !== args[i]) return false;
-  }
-
-  // Check env vars (only the ones we care about, excluding MCP_COMPOSE_MARKER)
-  const currentEnv = pm2Env.env ?? {};
-  for (const [key, value] of Object.entries(env)) {
-    if (key === MCP_COMPOSE_MARKER) continue;
-    if (currentEnv[key] !== value) return false;
-  }
-
-  return true;
+  return pm2Env[MCP_COMPOSE_CONFIG_HASH] === configHash;
 }
 
 /**
@@ -220,7 +275,8 @@ export function startServers(
   servers: NamedManagedServer[],
   prefix: string,
   portBase: number,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  options: { configPath?: string | undefined } = {}
 ): Promise<StartResult[]> {
   return withPm2(async () => {
     const total = servers.length;
@@ -245,21 +301,20 @@ export function startServers(
 
         if (existingPort !== null) {
           // Compare config using the existing port (not the newly suggested one)
-          const cmdForComparison = buildGatewayCmdForServer({
+          const serverForComparison = {
             ...serverConfig,
             internalPort: existingPort,
-          });
-          const serverEnv = serverConfig.type === 'stdio' ? serverConfig.env : {};
-          const envWithMarker = {
-            ...serverEnv,
-            [MCP_COMPOSE_MARKER]: name,
           };
+          const cmdForComparison = buildGatewayCmdForServer(serverForComparison, {
+            configPath: options.configPath,
+            serverName: name,
+          });
+          const configHash = createConfigHash(serverForComparison, cmdForComparison);
 
           if (isProcessConfigMatch(
             existingProcess,
             cmdForComparison.script,
-            cmdForComparison.args,
-            envWithMarker,
+            configHash,
             process.execPath,
           )) {
             serverStates.push({
@@ -347,16 +402,15 @@ export function startServers(
       await pm2Delete(processName);
       killSurvivorPids(descendantPids);
 
-      const cmd = buildGatewayCmdForServer({
+      const serverForStart = {
         ...serverConfig,
         internalPort: state.port,
-      });
-
-      const serverEnv = serverConfig.type === 'stdio' ? serverConfig.env : {};
-      const envWithMarker = {
-        ...serverEnv,
-        [MCP_COMPOSE_MARKER]: name,
       };
+      const cmd = buildGatewayCmdForServer(serverForStart, {
+        configPath: options.configPath,
+        serverName: name,
+      });
+      const envWithMarker = getPm2Env(name, serverForStart, cmd);
 
       const startOptions: StartOptions = {
         name: processName,

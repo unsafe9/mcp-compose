@@ -57,7 +57,7 @@ export function findConfigFile(startDir: string = process.cwd()): string | null 
 }
 
 export function loadConfig(configPath?: string): NormalizedConfig {
-  const resolvedPath = configPath ?? findConfigFile();
+  const resolvedPath = configPath ? expandPath(configPath) : findConfigFile();
 
   if (!resolvedPath) {
     throw new Error(
@@ -83,7 +83,10 @@ export function loadConfig(configPath?: string): NormalizedConfig {
   // Validate configuration structure
   assertValidConfig(config);
 
-  return normalizeConfig(config);
+  return {
+    ...normalizeConfig(config),
+    configPath: resolvedPath,
+  };
 }
 
 /**
