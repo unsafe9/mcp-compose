@@ -47,11 +47,16 @@
   "dependencies": {
     "commander": "^12.1.0",
     "cross-spawn": "^7.0.6",
-    "mcp-compose": "^0.0.5",
-    "pm2": "^5.4.3",
+    "pm2": "^7.0.1",
     "smol-toml": "^1.6.1",
     "string-env-interpolation": "^1.0.1",
     "strip-json-comments": "^5.0.3"
+  },
+  "overrides": {
+    "pm2": {
+      "js-yaml": "^4.2.0",
+      "ws": "^8.21.0"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
