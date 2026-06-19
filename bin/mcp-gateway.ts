@@ -2,6 +2,7 @@
 
 import { createGateway } from '../src/gateway.js';
 import type { GatewayOptions } from '../src/gateway.js';
+import { loadConfig } from '../src/config.js';
 import type { AuthMode, LogLevel } from '../src/types.js';
 
 function getArg(name: string): string | undefined {
@@ -35,18 +36,53 @@ function parseHeaders(raw: string | undefined): Record<string, string> {
   return result;
 }
 
-const port = parseInt(getArg('port') ?? '19100', 10);
-const logLevel = (getArg('log-level') ?? 'info') as LogLevel;
+function parsePort(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
+  return parseInt(raw, 10);
+}
 
 // Detect mode from arguments
+const configPath = getArg('config');
+const serverName = getArg('server');
 const command = getArg('command');
 const url = getArg('url');
 
 let options: GatewayOptions;
 
-if (command) {
+if (configPath || serverName) {
+  if (!configPath || !serverName) {
+    process.stderr.write('--config and --server must be provided together\n');
+    process.exit(1);
+  }
+
+  const config = loadConfig(configPath);
+  const server = config.mcpServers[serverName];
+  if (!server) {
+    process.stderr.write(`Unknown server "${serverName}" in ${configPath}\n`);
+    process.exit(1);
+  }
+
+  if (server.type !== 'proxy') {
+    process.stderr.write(`--server "${serverName}" must select a proxy server\n`);
+    process.exit(1);
+  }
+
+  options = {
+    mode: 'proxy',
+    port: parsePort(getArg('port'), server.internalPort),
+    url: server.url,
+    transport: server.transport,
+    headers: server.headers,
+    authMode: server.authMode,
+    logLevel: server.logLevel,
+  };
+} else if (command) {
+  const port = parsePort(getArg('port'), 19100);
+  const logLevel = (getArg('log-level') ?? 'info') as LogLevel;
   options = { mode: 'stdio', port, command, logLevel };
 } else if (url) {
+  const port = parsePort(getArg('port'), 19100);
+  const logLevel = (getArg('log-level') ?? 'info') as LogLevel;
   const transport = (getArg('transport') ?? 'http') as 'http' | 'sse';
   const headers = parseHeaders(getArg('headers'));
   const rawAuthMode = getArg('auth-mode') ?? 'managed';
@@ -60,6 +96,7 @@ if (command) {
   process.stderr.write(
     'Usage:\n' +
     '  mcp-gateway --command <cmd> --port <port> [--log-level debug|info|none]\n' +
+    '  mcp-gateway --config <path> --server <name> [--port <port>]\n' +
     '  mcp-gateway --url <url> --port <port> [--transport http|sse] [--headers \'{"k":"v"}\'] [--auth-mode managed|passthrough] [--log-level debug|info|none]\n'
   );
   process.exit(1);

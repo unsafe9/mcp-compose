@@ -95,7 +95,9 @@ program
       }
 
       if (filteredServers.length > 0) {
-        const results = await startServers(filteredServers, processPrefix, portBase, printProgress);
+        const results = await startServers(filteredServers, processPrefix, portBase, printProgress, {
+          configPath: config.configPath,
+        });
 
         // Update config with actual running ports before syncing
         for (const result of results) {
